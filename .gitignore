@@ -1,0 +1,39 @@
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Build artifacts
+target/
+dist/
+build/
+*.class
+*.jar
+*.zip
+
+# Backend
+fixitnow-backend/.mvn/wrapper/
+fixitnow-backend/target/
+fixitnow-backend/.classpath
+fixitnow-backend/.project
+fixitnow-backend/.settings/
+
+# Frontend
+fixitnow-backend/fixitnow-frontend/node_modules/
+fixitnow-backend/fixitnow-frontend/.env
+fixitnow-backend/fixitnow-frontend/.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+hs_err_pid*.log
+
+# Other
+.gradle/
+.m2/
