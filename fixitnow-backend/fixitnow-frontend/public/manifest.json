@@ -1,0 +1,15 @@
+{
+  "short_name": "FixItNow",
+  "name": "FixItNow",
+  "icons": [
+    {
+      "src": "fixitnow-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#ffcc00",
+  "background_color": "#ffffff"
+}
