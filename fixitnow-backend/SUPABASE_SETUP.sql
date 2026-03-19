@@ -1,5 +1,3 @@
--- Run this script in Supabase SQL Editor for FixItNow profile/report persistence.
-
 create extension if not exists pgcrypto;
 
 create table if not exists public.user_profiles (
@@ -10,6 +8,9 @@ create table if not exists public.user_profiles (
     last_name text not null,
     role text not null default 'STUDENT',
     phone_number text,
+    profile_image bytea,
+    profile_image_name text,
+    profile_image_content_type text,
     created_at timestamptz not null default timezone('utc', now()),
     updated_at timestamptz not null default timezone('utc', now())
 );
@@ -40,6 +41,9 @@ create table if not exists public.notifications (
 );
 
 alter table public.user_profiles add column if not exists role text not null default 'STUDENT';
+alter table public.user_profiles add column if not exists profile_image bytea;
+alter table public.user_profiles add column if not exists profile_image_name text;
+alter table public.user_profiles add column if not exists profile_image_content_type text;
 alter table public.report_items add column if not exists description text not null default 'No description provided.';
 alter table public.report_items add column if not exists location text not null default 'Unspecified location';
 alter table public.report_items add column if not exists image_name text;

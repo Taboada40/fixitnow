@@ -1,25 +1,26 @@
 package com.fixitnow.fixitnow_backend.controller;
 
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.HttpClientErrorException;
 
+import com.fixitnow.fixitnow_backend.model.PasswordChangeRequest;
 import com.fixitnow.fixitnow_backend.model.UserProfile;
 import com.fixitnow.fixitnow_backend.model.UserRequest;
 import com.fixitnow.fixitnow_backend.repository.UserRepository;
 import com.fixitnow.fixitnow_backend.service.ProfileService;
-import org.springframework.beans.factory.annotation.Value;
-
-import java.util.Locale;
-import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -48,6 +49,10 @@ public class AuthController {
             ResponseEntity<Map<String, Object>> signUpResponse = userRepository.signUp(request);
             if (signUpResponse.getStatusCode().is2xxSuccessful()) {
                 profileService.upsertFromRegistration(request);
+                return ResponseEntity.status(signUpResponse.getStatusCode()).body(Map.of(
+                        "message", "Registration successful",
+                        "data", signUpResponse.getBody()
+                ));
             }
             return signUpResponse;
         } catch (HttpClientErrorException e) {
@@ -60,7 +65,11 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<?> login(@RequestBody UserRequest request) {
-        String rawIdentifier = request != null ? request.getEmail() : null;
+        if (request == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Login payload is required"));
+        }
+
+        String rawIdentifier = request.getEmail();
         try {
             request.setEmail(resolveLoginIdentifier(request.getEmail()));
             if (request.getEmail() == null || request.getEmail().isBlank()) {
@@ -80,6 +89,7 @@ public class AuthController {
             }
 
             return ResponseEntity.ok(Map.of(
+                "message", "Login successful",
                 "session", signInResponse.getBody(),
                 "profile", profile
             ));
@@ -98,6 +108,7 @@ public class AuthController {
                 );
 
                 return ResponseEntity.ok(Map.of(
+                    "message", "Login successful",
                         "session", fallbackSession,
                         "profile", adminProfile
                 ));
@@ -226,11 +237,68 @@ public class AuthController {
                     .orElseGet(() -> profileService.ensureStudentProfile(fallbackEmail));
 
             return ResponseEntity.ok(Map.of(
+                    "message", "Login successful",
                     "session", signInResponse.getBody(),
                     "profile", profile
             ));
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    @PutMapping("/password")
+    public ResponseEntity<?> changePassword(@RequestBody PasswordChangeRequest request) {
+        if (request == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Password payload is required"));
+        }
+
+        String identifier = resolveLoginIdentifier(request.getEmail());
+        if (identifier == null || identifier.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Email or login ID is required"));
+        }
+
+        if (request.getCurrentPassword() == null || request.getCurrentPassword().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Current password is required"));
+        }
+
+        String newPassword = request.getNewPassword() == null ? "" : request.getNewPassword().trim();
+        if (newPassword.length() < 6) {
+            return ResponseEntity.badRequest().body(Map.of("message", "New password must be at least 6 characters"));
+        }
+
+        if (request.getCurrentPassword().equals(newPassword)) {
+            return ResponseEntity.badRequest().body(Map.of("message", "New password must be different from current password"));
+        }
+
+        try {
+            UserRequest verify = new UserRequest();
+            verify.setEmail(identifier);
+            verify.setPassword(request.getCurrentPassword());
+
+            ResponseEntity<Map<String, Object>> signInResponse = userRepository.signIn(verify);
+            Map<String, Object> sessionBody = signInResponse.getBody();
+            String accessToken = sessionBody == null ? null : valueAsText(sessionBody.get("access_token"));
+
+            if (accessToken == null || accessToken.isBlank()) {
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                        .body(Map.of("message", "Unable to obtain access token for password update"));
+            }
+
+            userRepository.updatePassword(accessToken, newPassword);
+
+            return ResponseEntity.ok(Map.of(
+                    "message", "Password updated successfully",
+                    "email", identifier
+            ));
+        } catch (HttpClientErrorException e) {
+            return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Password update failed: " + e.getMessage()));
+        }
+    }
+
+    private String valueAsText(Object value) {
+        return value == null ? null : value.toString();
     }
 }

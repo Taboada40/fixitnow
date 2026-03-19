@@ -1,12 +1,13 @@
 package com.fixitnow.fixitnow_backend.config;
 
-import com.fixitnow.fixitnow_backend.repository.SupabaseProfileRepository;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
-import java.util.logging.Level;
-import java.util.logging.Logger;
+import com.fixitnow.fixitnow_backend.repository.SupabaseProfileRepository;
 
 @Component
 public class ProfileMigrationConfig {
@@ -27,7 +28,8 @@ public class ProfileMigrationConfig {
                 LOGGER.log(Level.INFO, "Migrated {0} legacy profile row(s) from profiles to user_profiles.", migrated);
             }
         } catch (Exception ex) {
-            LOGGER.log(Level.WARNING, "Legacy profile migration skipped: " + ex.getMessage());
+            LOGGER.log(Level.WARNING, "Legacy profile migration skipped: {0}", ex.getMessage());
+            LOGGER.log(Level.FINE, "Legacy profile migration stack trace", ex);
         }
     }
 }

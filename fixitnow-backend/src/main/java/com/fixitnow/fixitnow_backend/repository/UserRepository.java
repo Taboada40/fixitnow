@@ -34,6 +34,14 @@ public class UserRepository {
         return headers;
     }
 
+    private HttpHeaders createUserAuthHeaders(String accessToken) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("apikey", supabaseKey);
+        headers.set("Authorization", "Bearer " + accessToken);
+        return headers;
+    }
+
     public ResponseEntity<Map<String, Object>> signUp(UserRequest userRequest) {
         String url = supabaseUrl + "/auth/v1/signup";
         Map<String, Object> data = new HashMap<>();
@@ -71,6 +79,19 @@ public class UserRepository {
             entity,
             new ParameterizedTypeReference<Map<String, Object>>() {
             }
+        );
+    }
+
+    public ResponseEntity<Map<String, Object>> updatePassword(String accessToken, String newPassword) {
+        String url = supabaseUrl + "/auth/v1/user";
+        Map<String, String> body = Map.of("password", newPassword);
+        HttpEntity<Map<String, String>> entity = new HttpEntity<>(body, createUserAuthHeaders(accessToken));
+        return restTemplate.exchange(
+                url,
+                HttpMethod.PUT,
+                entity,
+                new ParameterizedTypeReference<Map<String, Object>>() {
+                }
         );
     }
 }

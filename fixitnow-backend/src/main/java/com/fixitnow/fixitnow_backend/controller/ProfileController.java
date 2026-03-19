@@ -1,20 +1,25 @@
 package com.fixitnow.fixitnow_backend.controller;
 
-import com.fixitnow.fixitnow_backend.model.UserProfile;
-import com.fixitnow.fixitnow_backend.model.UserProfileRequest;
-import com.fixitnow.fixitnow_backend.service.ProfileService;
+import java.io.IOException;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
-import java.util.Locale;
-import java.util.Map;
-import java.util.Optional;
+import com.fixitnow.fixitnow_backend.model.UserProfile;
+import com.fixitnow.fixitnow_backend.model.UserProfileRequest;
+import com.fixitnow.fixitnow_backend.service.ProfileService;
 
 @RestController
 @RequestMapping("/api/profile")
@@ -80,17 +85,60 @@ public class ProfileController {
             request.setEmail(null);
         }
 
-        UserProfile persisted = profileService.updateProfile(request);
+        try {
+            UserProfile persisted = profileService.updateProfile(request);
+            return ResponseEntity.ok(persisted);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
 
-        return ResponseEntity.ok(persisted);
+    @PostMapping(value = "/picture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> uploadProfilePicture(
+            @RequestParam(value = "userId", required = false) Long userId,
+            @RequestParam(value = "email", required = false) String email,
+            @RequestParam("file") MultipartFile file
+    ) {
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Profile image file is required"));
+        }
+
+        if (!isAllowedImage(file)) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Only .jpg, .jpeg, and .png images are supported"));
+        }
+
+        String normalizedEmail = normalizeEmail(email);
+        if (userId == null && (normalizedEmail == null || normalizedEmail.isBlank())) {
+            return ResponseEntity.badRequest().body(Map.of("message", "User ID or email is required"));
+        }
+
+        try {
+            UserProfile profile = profileService.updateProfilePicture(
+                    userId,
+                    normalizedEmail,
+                    file.getOriginalFilename(),
+                    file.getContentType(),
+                    file.getBytes()
+            );
+
+            String fileReference = buildFileReference(profile);
+            return ResponseEntity.ok(Map.of(
+                    "message", "Profile picture uploaded successfully",
+                    "fileReference", fileReference,
+                    "profile", profile
+            ));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        } catch (IOException e) {
+            return ResponseEntity.status(500).body(Map.of("message", "Failed to read uploaded file"));
+        }
     }
 
     private String normalizeEmail(String value) {
         if (value == null) {
             return null;
         }
-        String input = value.trim().toLowerCase();
-        return input;
+        return value.trim().toLowerCase();
     }
 
     private String resolveIdentifierToEmail(String value) {
@@ -114,5 +162,38 @@ public class ProfileController {
                 .map(this::normalizeEmail)
                 .findFirst()
                 .orElse(normalizedEmail);
+    }
+
+    private boolean isAllowedImage(MultipartFile file) {
+        String rawContentType = file.getContentType();
+        String contentType = rawContentType == null ? "" : rawContentType.toLowerCase(Locale.ROOT);
+        boolean allowedType = contentType.equals("image/jpeg") || contentType.equals("image/jpg") || contentType.equals("image/png");
+
+        String rawOriginalName = file.getOriginalFilename();
+        String originalName = rawOriginalName == null ? "" : rawOriginalName.toLowerCase(Locale.ROOT);
+        boolean allowedExtension = originalName.endsWith(".jpg") || originalName.endsWith(".jpeg") || originalName.endsWith(".png");
+
+        return allowedType || allowedExtension;
+    }
+
+    private String buildFileReference(UserProfile profile) {
+        if (profile == null) {
+            return "profile-picture:unknown:image";
+        }
+
+        String identity = profile.getId() != null
+                ? String.valueOf(profile.getId())
+                : normalizeEmail(profile.getEmail());
+
+        String profileImageName = profile.getProfileImageName();
+        String fileName = profileImageName == null || profileImageName.isBlank()
+                ? "image"
+                : profileImageName.trim();
+
+        if (identity == null || identity.isBlank()) {
+            identity = "unknown";
+        }
+
+        return "profile-picture:" + identity + ":" + fileName;
     }
 }

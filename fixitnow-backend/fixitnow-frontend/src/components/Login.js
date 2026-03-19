@@ -19,7 +19,7 @@ const Login = () => {
 
         const identifier = normalizeIdentifier(creds.email);
         if (!identifier) {
-            setError('Please enter your email or login ID.');
+            setError('Please enter your email.');
             return;
         }
         if (creds.password.length < 6) {
@@ -78,7 +78,7 @@ const Login = () => {
                     {error && <div className="error-msg">{error}</div>}
                     <form onSubmit={handleLogin}>
                         <div className="form-group">
-                            <label>Email or Login ID</label>
+                            <label>Email</label>
                             <input
                                 type="text"
                                 required

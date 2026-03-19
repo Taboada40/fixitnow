@@ -16,6 +16,7 @@ import org.springframework.web.util.UriUtils;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -99,6 +100,9 @@ public class SupabaseProfileRepository {
         body.put("last_name", profile.getLastName());
         body.put("role", profile.getRole());
         body.put("phone_number", profile.getPhoneNumber());
+        body.put("profile_image", toByteaLiteral(profile.getProfileImage()));
+        body.put("profile_image_name", profile.getProfileImageName());
+        body.put("profile_image_content_type", profile.getProfileImageContentType());
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, createUpsertHeaders());
         ResponseEntity<List<Map<String, Object>>> response;
@@ -229,6 +233,9 @@ public class SupabaseProfileRepository {
         profile.setLastName(toText(row.get("last_name")));
         profile.setRole(toText(row.get("role")));
         profile.setPhoneNumber(toText(row.get("phone_number")));
+        profile.setProfileImage(toBytes(row.get("profile_image")));
+        profile.setProfileImageName(toText(row.get("profile_image_name")));
+        profile.setProfileImageContentType(toText(row.get("profile_image_content_type")));
         profile.setCreatedAt(parseDateTime(row.get("created_at")));
         profile.setUpdatedAt(parseDateTime(row.get("updated_at")));
         return profile;
@@ -274,15 +281,17 @@ public class SupabaseProfileRepository {
         if (value instanceof Number number) {
             return number.longValue();
         }
-        return Long.parseLong(value.toString());
+        if (value instanceof String text) {
+            return Long.valueOf(text);
+        }
+        return Long.valueOf(String.valueOf(value));
     }
 
     private String normalizeEmail(String value) {
         if (value == null) {
             return "";
         }
-        String input = value.trim().toLowerCase();
-        return input;
+        return value.trim().toLowerCase();
     }
 
     private String valueOrFallback(String value, String fallback) {
@@ -290,6 +299,51 @@ public class SupabaseProfileRepository {
             return fallback;
         }
         return value.trim();
+    }
+
+    private String toByteaLiteral(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return null;
+        }
+
+        StringBuilder builder = new StringBuilder("\\x");
+        for (byte b : bytes) {
+            builder.append(String.format("%02x", b));
+        }
+        return builder.toString();
+    }
+
+    private byte[] toBytes(Object value) {
+        if (value == null) {
+            return null;
+        }
+
+        if (value instanceof byte[] bytes) {
+            return bytes;
+        }
+
+        String text = value.toString();
+        if (text.isBlank()) {
+            return null;
+        }
+
+        String normalized = text.startsWith("\\x") ? text.substring(2)
+                : text.startsWith("0x") ? text.substring(2)
+                : null;
+
+        if (normalized != null && normalized.length() % 2 == 0 && normalized.matches("[0-9a-fA-F]+")) {
+            byte[] bytes = new byte[normalized.length() / 2];
+            for (int i = 0; i < normalized.length(); i += 2) {
+                bytes[i / 2] = (byte) Integer.parseInt(normalized.substring(i, i + 2), 16);
+            }
+            return bytes;
+        }
+
+        try {
+            return Base64.getDecoder().decode(text);
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private IllegalStateException mapClientError(String tableName, HttpClientErrorException e) {

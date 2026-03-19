@@ -1,13 +1,14 @@
 package com.fixitnow.fixitnow_backend.service;
 
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.stereotype.Service;
+
 import com.fixitnow.fixitnow_backend.model.UserProfile;
 import com.fixitnow.fixitnow_backend.model.UserProfileRequest;
 import com.fixitnow.fixitnow_backend.model.UserRequest;
 import com.fixitnow.fixitnow_backend.repository.SupabaseProfileRepository;
-import org.springframework.stereotype.Service;
-
-import java.util.List;
-import java.util.Optional;
 
 @Service
 public class ProfileService {
@@ -48,6 +49,10 @@ public class ProfileService {
         UserProfile profile = resolveProfileForUpdate(request);
 
         String normalizedEmail = valueOrFallback(request.getEmail(), profile.getEmail());
+        if (normalizedEmail == null || normalizedEmail.isBlank()) {
+            throw new IllegalArgumentException("Email is required to update profile");
+        }
+
         profile.setEmail(normalizedEmail);
         profile.setUsername(mergeValue(request.getUsername(), profile.getUsername(), normalizedEmail));
         profile.setFirstName(mergeValue(request.getFirstName(), profile.getFirstName(), "First"));
@@ -85,6 +90,19 @@ public class ProfileService {
         profile.setFirstName(valueOrFallback(profile.getFirstName(), "First"));
         profile.setLastName(valueOrFallback(profile.getLastName(), "Last"));
         profile.setRole(valueOrFallback(profile.getRole(), "STUDENT").toUpperCase());
+
+        return profileRepository.upsert(profile);
+    }
+
+    public UserProfile updateProfilePicture(Long userId, String email, String fileName, String contentType, byte[] imageBytes) {
+        if (imageBytes == null || imageBytes.length == 0) {
+            throw new IllegalArgumentException("Profile image is required");
+        }
+
+        UserProfile profile = resolveProfileForImageUpdate(userId, email);
+        profile.setProfileImage(imageBytes);
+        profile.setProfileImageName(fileName);
+        profile.setProfileImageContentType(contentType);
 
         return profileRepository.upsert(profile);
     }
@@ -143,5 +161,21 @@ public class ProfileService {
             profile.setId(request.getId());
         }
         return profile;
+    }
+
+    private UserProfile resolveProfileForImageUpdate(Long userId, String email) {
+        if (userId != null) {
+            Optional<UserProfile> byId = profileRepository.findById(userId);
+            if (byId.isPresent()) {
+                return byId.get();
+            }
+        }
+
+        if (email != null && !email.isBlank()) {
+            return profileRepository.findByEmail(email)
+                    .orElseGet(() -> ensureStudentProfile(email));
+        }
+
+        throw new IllegalArgumentException("User ID or email is required to update profile image");
     }
 }
