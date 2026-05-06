@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-
-const API_BASE = 'http://localhost:8080';
+import { API_BASE } from '../utils/constants';
 
 const buildProfileImageSrc = (profile) => {
     if (!profile?.profileImage) {
@@ -104,7 +103,8 @@ const Profile = () => {
     const persistSessionAndForm = useCallback((profile) => {
         const latestProfile = profile || {};
         setProfileId(latestProfile.id || profileId || authenticatedUserId || null);
-        setFormData({
+
+        const updatedFormData = {
             firstName: latestProfile.firstName || '',
             lastName: latestProfile.lastName || '',
             username: latestProfile.username || '',
@@ -113,32 +113,40 @@ const Profile = () => {
             profileImage: latestProfile.profileImage || '',
             profileImageName: latestProfile.profileImageName || '',
             profileImageContentType: latestProfile.profileImageContentType || ''
-        });
+        };
+
+        setFormData(updatedFormData);
         setFileReference(buildFileReferenceFromProfile(latestProfile));
 
         const latestSession = JSON.parse(localStorage.getItem('session') || 'null');
         const updatedSession = mergeSessionProfile(latestSession, latestProfile);
         localStorage.setItem('session', JSON.stringify(updatedSession));
+
+        window.dispatchEvent(new CustomEvent('profileUpdated', { detail: updatedFormData }));
     }, [profileId, authenticatedUserId, authenticatedEmail]);
 
     const fetchCanonicalProfile = useCallback(async (profileHint = null) => {
         const hintId = profileHint?.id || profileId || authenticatedUserId;
         const hintEmail = (profileHint?.email || formData.email || authenticatedEmail || '').trim();
 
-        if (hintId) {
-            const byId = await axios.get(
-                `${API_BASE}/api/profile/by-id?userId=${encodeURIComponent(hintId)}&_ts=${Date.now()}`,
-                { withCredentials: true }
-            );
-            return byId.data || profileHint;
-        }
+        try {
+            if (hintId) {
+                const byId = await axios.get(
+                    `${API_BASE}/api/profile/by-id?userId=${encodeURIComponent(hintId)}&_ts=${Date.now()}`,
+                    { withCredentials: true, timeout: 3000 }
+                );
+                return byId.data || profileHint;
+            }
 
-        if (hintEmail) {
-            const byIdentifier = await axios.get(
-                `${API_BASE}/api/profile/authenticated?identifier=${encodeURIComponent(hintEmail)}&_ts=${Date.now()}`,
-                { withCredentials: true }
-            );
-            return byIdentifier.data || profileHint;
+            if (hintEmail) {
+                const byIdentifier = await axios.get(
+                    `${API_BASE}/api/profile/authenticated?identifier=${encodeURIComponent(hintEmail)}&_ts=${Date.now()}`,
+                    { withCredentials: true, timeout: 3000 }
+                );
+                return byIdentifier.data || profileHint;
+            }
+        } catch (err) {
+            console.warn('Failed to fetch canonical profile, using hint:', err.message);
         }
 
         return profileHint;
@@ -161,6 +169,8 @@ const Profile = () => {
         }
 
         setSaving(true);
+        setError('');
+        setSuccess('');
 
         try {
             const res = await axios.put(`${API_BASE}/api/profile`, payload, {
@@ -172,9 +182,11 @@ const Profile = () => {
             persistSessionAndForm(canonicalProfile || persistedProfile);
 
             setSuccess('Profile updated successfully.');
+            setTimeout(() => setSuccess(''), 4000);
         } catch (err) {
             const message = err.response?.data?.message || 'Failed to update profile.';
             setError(message);
+            setTimeout(() => setError(''), 5000);
         } finally {
             setSaving(false);
         }
@@ -242,12 +254,13 @@ const Profile = () => {
 
             const canonicalProfile = await fetchCanonicalProfile(uploadedProfile);
             persistSessionAndForm(canonicalProfile || uploadedProfile);
-
             setFileReference(reference);
             setSuccess(uploadRes.data?.message || 'Profile picture uploaded successfully.');
+            setTimeout(() => setSuccess(''), 4000);
         } catch (err) {
             const message = err.response?.data?.message || 'Failed to upload profile picture.';
             setError(message);
+            setTimeout(() => setError(''), 5000);
         } finally {
             setUploadingImage(false);
         }

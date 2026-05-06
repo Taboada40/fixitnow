@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE, getErrorMessage } from '../utils/constants';
 
 const ReportHistory = () => {
     const navigate = useNavigate();
@@ -30,12 +31,12 @@ const ReportHistory = () => {
             }
 
             try {
-                const res = await axios.get(`http://localhost:8080/api/reports?userId=${encodeURIComponent(userId)}`, {
+                const res = await axios.get(`${API_BASE}/api/reports?userId=${encodeURIComponent(userId)}`, {
                     withCredentials: true
                 });
                 setReports(Array.isArray(res.data) ? res.data : []);
             } catch (err) {
-                const message = err.response?.data?.message || 'Failed to load report history.';
+                const message = getErrorMessage(err, 'Failed to load report history.');
                 setError(message);
             } finally {
                 setLoading(false);
@@ -51,12 +52,12 @@ const ReportHistory = () => {
         }
 
         try {
-            await axios.delete(`http://localhost:8080/api/reports/${id}?userId=${encodeURIComponent(userId)}`, {
+            await axios.delete(`${API_BASE}/api/reports/${id}?userId=${encodeURIComponent(userId)}`, {
                 withCredentials: true
             });
             setReports((prev) => prev.filter((item) => item.id !== id));
         } catch (err) {
-            const message = err.response?.data?.message || 'Failed to delete report.';
+            const message = getErrorMessage(err, 'Failed to delete report.');
             setError(message);
         }
     };

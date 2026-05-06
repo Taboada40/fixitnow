@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE } from '../utils/constants';
 
 const ReportIssue = () => {
     const navigate = useNavigate();
@@ -56,7 +57,7 @@ const ReportIssue = () => {
 
         setSubmitting(true);
         try {
-            await axios.post('http://localhost:8080/api/reports', {
+            await axios.post(`${API_BASE}/api/reports`, {
                 userId,
                 description: formData.description,
                 location: formData.location,

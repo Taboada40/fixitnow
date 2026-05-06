@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE, STATUS_COLORS, getErrorMessage, normalizeStatus } from '../utils/constants';
 
 // Simple SVG icons inline (no extra dependencies)
 const HomeIcon = () => (
@@ -31,42 +32,6 @@ const SearchIcon = () => (
     </svg>
 );
 
-const STATUS_COLORS = {
-    'In-Progress': '#FFCC00',
-    'Pending':     '#aaaaaa',
-    'Fixed':       '#4ade80',
-    'Cancelled':   '#ff8a8a',
-};
-
-const getErrorMessage = (err, fallback) => {
-    let raw = err?.response?.data;
-    if (typeof raw === 'string') {
-        try {
-            raw = JSON.parse(raw);
-        } catch (_) {
-            return raw || fallback;
-        }
-    }
-    if (raw && typeof raw === 'object') {
-        return raw.message || raw.error_description || raw.error || fallback;
-    }
-    return fallback;
-};
-
-const normalizeStatus = (value) => {
-    const status = String(value || '').trim().toLowerCase();
-    if (status === 'in-progress') {
-        return 'In-Progress';
-    }
-    if (status === 'fixed') {
-        return 'Fixed';
-    }
-    if (status === 'cancelled') {
-        return 'Cancelled';
-    }
-    return 'Pending';
-};
-
 const buildSummaryFromReports = (items) => {
     const reports = Array.isArray(items) ? items : [];
     const totalReports = reports.length;
@@ -78,8 +43,6 @@ const buildSummaryFromReports = (items) => {
         alertsCount: Math.max(totalReports - resolvedReports, 0)
     };
 };
-
-const API_BASE = 'http://localhost:8080';
 
 const persistFreshProfile = (nextProfile) => {
     try {
@@ -225,9 +188,18 @@ const Dashboard = () => {
                 loadDashboardData(false);
             }
         };
+        const onProfileUpdated = (event) => {
+            const updatedProfile = event.detail;
+            setFreshProfile(prevProfile => ({
+                ...prevProfile,
+                ...updatedProfile
+            }));
+            persistFreshProfile(updatedProfile);
+        };
 
         window.addEventListener('focus', onFocus);
         document.addEventListener('visibilitychange', onVisible);
+        window.addEventListener('profileUpdated', onProfileUpdated);
 
         if (refreshTimerRef.current) {
             clearInterval(refreshTimerRef.current);
@@ -239,6 +211,7 @@ const Dashboard = () => {
         return () => {
             window.removeEventListener('focus', onFocus);
             document.removeEventListener('visibilitychange', onVisible);
+            window.removeEventListener('profileUpdated', onProfileUpdated);
             if (refreshTimerRef.current) {
                 clearInterval(refreshTimerRef.current);
                 refreshTimerRef.current = null;

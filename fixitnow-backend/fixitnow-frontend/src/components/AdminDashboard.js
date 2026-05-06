@@ -1,32 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-
-const STATUS_OPTIONS = ['Pending', 'In-Progress', 'Fixed', 'Cancelled'];
-const DEFAULT_ADMIN_EMAIL = 'admin@cit.edu';
-
-const getErrorMessage = (err, fallback) => {
-    let raw = err?.response?.data;
-    if (typeof raw === 'string') {
-        try {
-            raw = JSON.parse(raw);
-        } catch (_) {
-            return raw || fallback;
-        }
-    }
-    if (raw && typeof raw === 'object') {
-        return raw.message || raw.error_description || raw.error || fallback;
-    }
-    return fallback;
-};
-
-const normalizeStatus = (value) => {
-    if (!value) {
-        return 'Pending';
-    }
-    const match = STATUS_OPTIONS.find((option) => option.toLowerCase() === String(value).toLowerCase());
-    return match || 'Pending';
-};
+import { API_BASE, STATUS_OPTIONS, DEFAULT_ADMIN_EMAIL, getErrorMessage, normalizeStatus } from '../utils/constants';
 
 const AdminDashboard = () => {
     const navigate = useNavigate();
@@ -68,10 +43,10 @@ const AdminDashboard = () => {
         const loadDashboardData = async () => {
             try {
                 const [reportsRes, summaryRes] = await Promise.all([
-                    axios.get(`http://localhost:8080/api/admin/reports?adminEmail=${encodeURIComponent(adminEmail || '')}`, {
+                    axios.get(`${API_BASE}/api/admin/reports?adminEmail=${encodeURIComponent(adminEmail || '')}`, {
                         withCredentials: true
                     }),
-                    axios.get(`http://localhost:8080/api/admin/summary?adminEmail=${encodeURIComponent(adminEmail || '')}`, {
+                    axios.get(`${API_BASE}/api/admin/summary?adminEmail=${encodeURIComponent(adminEmail || '')}`, {
                         withCredentials: true
                     })
                 ]);
@@ -96,7 +71,7 @@ const AdminDashboard = () => {
 
     const refreshSummary = async () => {
         try {
-            const summaryRes = await axios.get(`http://localhost:8080/api/admin/summary?adminEmail=${encodeURIComponent(adminEmail || '')}`, {
+            const summaryRes = await axios.get(`${API_BASE}/api/admin/summary?adminEmail=${encodeURIComponent(adminEmail || '')}`, {
                 withCredentials: true
             });
             setSummary({
@@ -116,7 +91,7 @@ const AdminDashboard = () => {
         setSuccess('');
         setUpdatingId(reportId);
         try {
-            const res = await axios.put(`http://localhost:8080/api/admin/reports/${reportId}/status`, {
+            const res = await axios.put(`${API_BASE}/api/admin/reports/${reportId}/status`, {
                 adminEmail,
                 status
             }, { withCredentials: true });

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
+import { API_BASE, getErrorMessage } from '../utils/constants';
 
 const Login = () => {
     const [creds, setCreds] = useState({ email: '', password: '' });
@@ -8,16 +9,11 @@ const Login = () => {
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
 
-    const normalizeIdentifier = (value) => {
-        const input = (value || '').trim().toLowerCase();
-        return input;
-    };
-
     const handleLogin = async (e) => {
         e.preventDefault();
         setError('');
 
-        const identifier = normalizeIdentifier(creds.email);
+        const identifier = (creds.email || '').trim().toLowerCase();
         if (!identifier) {
             setError('Please enter your email.');
             return;
@@ -29,7 +25,7 @@ const Login = () => {
 
         setLoading(true);
         try {
-            const res = await axios.post('http://localhost:8080/api/auth/login', {
+            const res = await axios.post(`${API_BASE}/api/auth/login`, {
                 ...creds,
                 email: identifier
             }, {
@@ -48,19 +44,16 @@ const Login = () => {
                 setError('Cannot reach server. Please make sure backend is running on port 8080.');
                 return;
             }
-            // Parse the real error from Supabase passed through the backend
-            let raw = err.response?.data;
-            if (typeof raw === 'string') {
-                try { raw = JSON.parse(raw); } catch (_) { /* keep as string */ }
-            }
-            const msg = (typeof raw === 'object' ? (raw?.error_description || raw?.error_code || raw?.message) : raw) || '';
-            const low = msg.toLowerCase();
+
+            const baseMessage = getErrorMessage(err, 'Login failed. Please try again.');
+            const low = baseMessage.toLowerCase();
+
             if (low.includes('email not confirmed')) {
                 setError('Please verify your email first, then try logging in again.');
             } else if (low.includes('invalid login credentials') || low.includes('invalid')) {
                 setError('Incorrect email or password. Please try again.');
             } else {
-                setError(msg || 'Login failed. Please try again.');
+                setError(baseMessage);
             }
         } finally {
             setLoading(false);

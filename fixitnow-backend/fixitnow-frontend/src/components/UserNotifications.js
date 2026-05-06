@@ -1,23 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { API_BASE, getErrorMessage } from '../utils/constants';
 
 const POLL_INTERVAL_MS = 8000;
-
-const getErrorMessage = (err, fallback) => {
-    let raw = err?.response?.data;
-    if (typeof raw === 'string') {
-        try {
-            raw = JSON.parse(raw);
-        } catch (_) {
-            return raw || fallback;
-        }
-    }
-    if (raw && typeof raw === 'object') {
-        return raw.message || raw.error_description || raw.error || fallback;
-    }
-    return fallback;
-};
 
 const UserNotifications = () => {
     const navigate = useNavigate();
@@ -57,7 +43,7 @@ const UserNotifications = () => {
                     params.set('email', email);
                 }
 
-                const res = await axios.get(`http://localhost:8080/api/notifications?${params.toString()}`, {
+                const res = await axios.get(`${API_BASE}/api/notifications?${params.toString()}`, {
                     withCredentials: true
                 });
                 setNotifications(Array.isArray(res.data) ? res.data : []);

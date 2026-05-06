@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-
-const DEFAULT_ADMIN_EMAIL = 'admin@cit.edu';
+import { API_BASE, DEFAULT_ADMIN_EMAIL } from '../utils/constants';
 
 const AdminNotifications = () => {
     const navigate = useNavigate();
@@ -26,7 +25,7 @@ const AdminNotifications = () => {
 
         const loadNotifications = async () => {
             try {
-                const res = await axios.get(`http://localhost:8080/api/admin/notifications?adminEmail=${encodeURIComponent(adminEmail || '')}`, {
+                const res = await axios.get(`${API_BASE}/api/admin/notifications?adminEmail=${encodeURIComponent(adminEmail || '')}`, {
                     withCredentials: true
                 });
                 setNotifications(Array.isArray(res.data) ? res.data : []);

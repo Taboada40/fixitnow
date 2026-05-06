@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
+import { API_BASE, normalizeEmail } from '../utils/constants';
 
 const Register = () => {
     const [formData, setFormData] = useState({
@@ -15,14 +16,6 @@ const Register = () => {
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
-
-    const normalizeEmail = (value) => {
-        const input = (value || '').trim().toLowerCase();
-        if (!input) {
-            return '';
-        }
-        return input.includes('@') ? input : `${input}@project.local`;
-    };
 
     const handleRegister = async (e) => {
         e.preventDefault();
@@ -44,7 +37,7 @@ const Register = () => {
 
         setLoading(true);
         try {
-            await axios.post('http://localhost:8080/api/auth/register', {
+            await axios.post(`${API_BASE}/api/auth/register`, {
                 firstName: formData.firstName,
                 lastName: formData.lastName,
                 username: formData.username,
