@@ -21,6 +21,7 @@ import com.fixitnow.fixitnow_backend.model.UserProfile;
 import com.fixitnow.fixitnow_backend.model.UserRequest;
 import com.fixitnow.fixitnow_backend.repository.UserRepository;
 import com.fixitnow.fixitnow_backend.service.ProfileService;
+import com.fixitnow.fixitnow_backend.util.StringUtils;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -42,7 +43,7 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody UserRequest request) {
         try {
-            request.setEmail(normalizeEmail(request.getEmail()));
+            request.setEmail(StringUtils.normalizeEmail(request.getEmail()));
             if (request.getEmail() == null || request.getEmail().isBlank()) {
                 return ResponseEntity.badRequest().body(Map.of("message", "Email or login ID is required"));
             }
@@ -79,9 +80,9 @@ public class AuthController {
             UserProfile profile = profileService.getByEmail(request.getEmail())
                 .orElseGet(() -> profileService.upsertFromRegistration(request));
 
-            if (normalizeEmail(request.getEmail()).equals(normalizeEmail(configuredAdminEmail))) {
+            if (StringUtils.normalizeEmail(request.getEmail()).equals(StringUtils.normalizeEmail(configuredAdminEmail))) {
                 profile = profileService.ensureAdminProfile(
-                        normalizeEmail(request.getEmail()),
+                        StringUtils.normalizeEmail(request.getEmail()),
                         "admin",
                         "Admin",
                         "User"
@@ -127,14 +128,6 @@ public class AuthController {
         }
     }
 
-    private String normalizeEmail(String value) {
-        if (value == null) {
-            return null;
-        }
-        String input = value.trim().toLowerCase();
-        return input;
-    }
-
     private boolean isDefaultAdminLogin(UserRequest request) {
         if (request == null) {
             return false;
@@ -154,7 +147,7 @@ public class AuthController {
             return "";
         }
 
-        String normalizedCandidate = normalizeEmail(raw);
+        String normalizedCandidate = StringUtils.normalizeEmail(raw);
 
         // 1) If this exact email exists in profile records, use it directly.
         Optional<UserProfile> byEmail = profileService.getByEmail(normalizedCandidate);
@@ -176,7 +169,7 @@ public class AuthController {
                 if (byUsername.isPresent()
                         && byUsername.get().getEmail() != null
                         && !byUsername.get().getEmail().isBlank()) {
-                    return normalizeEmail(byUsername.get().getEmail());
+                    return StringUtils.normalizeEmail(byUsername.get().getEmail());
                 }
 
                 Optional<UserProfile> byEmailLocalPart = profileService.listAllProfiles()
@@ -196,9 +189,9 @@ public class AuthController {
                         .findFirst();
 
                 if (byEmailLocalPart.isPresent()) {
-                    return normalizeEmail(byEmailLocalPart.get().getEmail());
+                    return StringUtils.normalizeEmail(byEmailLocalPart.get().getEmail());
                 }
-            } catch (Exception ignored) {
+            } catch (Exception e) {
                 // Fall back to normalized input when profile lookup is unavailable.
             }
         }

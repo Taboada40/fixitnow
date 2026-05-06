@@ -1,6 +1,7 @@
 package com.fixitnow.fixitnow_backend.repository;
 
 import com.fixitnow.fixitnow_backend.model.UserProfile;
+import com.fixitnow.fixitnow_backend.util.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
@@ -65,7 +66,7 @@ public class SupabaseProfileRepository {
     }
 
     public Optional<UserProfile> findByEmail(String email) {
-        String normalized = normalizeEmail(email);
+        String normalized = StringUtils.normalizeEmail(email);
         String url = supabaseUrl + "/rest/v1/user_profiles?select=*&email=eq."
                 + UriUtils.encode(normalized, StandardCharsets.UTF_8);
 
@@ -94,7 +95,7 @@ public class SupabaseProfileRepository {
         String url = supabaseUrl + "/rest/v1/user_profiles?on_conflict=email";
 
         Map<String, Object> body = new HashMap<>();
-        body.put("email", normalizeEmail(profile.getEmail()));
+        body.put("email", StringUtils.normalizeEmail(profile.getEmail()));
         body.put("username", profile.getUsername());
         body.put("first_name", profile.getFirstName());
         body.put("last_name", profile.getLastName());
@@ -154,24 +155,24 @@ public class SupabaseProfileRepository {
         Set<String> existingEmails = canonical.stream()
                 .map(UserProfile::getEmail)
                 .filter(e -> e != null && !e.isBlank())
-                .map(this::normalizeEmail)
+                .map(StringUtils::normalizeEmail)
                 .collect(Collectors.toCollection(HashSet::new));
 
         List<UserProfile> legacyProfiles = listLegacyProfiles();
         int migrated = 0;
 
         for (UserProfile legacy : legacyProfiles) {
-            String email = normalizeEmail(legacy.getEmail());
+            String email = StringUtils.normalizeEmail(legacy.getEmail());
             if (email.isBlank() || existingEmails.contains(email)) {
                 continue;
             }
 
             UserProfile toUpsert = new UserProfile();
             toUpsert.setEmail(email);
-            toUpsert.setUsername(valueOrFallback(legacy.getUsername(), email));
-            toUpsert.setFirstName(valueOrFallback(legacy.getFirstName(), "First"));
-            toUpsert.setLastName(valueOrFallback(legacy.getLastName(), "Last"));
-            toUpsert.setRole(valueOrFallback(legacy.getRole(), "STUDENT").toUpperCase());
+            toUpsert.setUsername(StringUtils.valueOrFallback(legacy.getUsername(), email));
+            toUpsert.setFirstName(StringUtils.valueOrFallback(legacy.getFirstName(), "First"));
+            toUpsert.setLastName(StringUtils.valueOrFallback(legacy.getLastName(), "Last"));
+            toUpsert.setRole(StringUtils.valueOrFallback(legacy.getRole(), "STUDENT").toUpperCase());
             toUpsert.setPhoneNumber(legacy.getPhoneNumber());
 
             upsert(toUpsert);
@@ -285,20 +286,6 @@ public class SupabaseProfileRepository {
             return Long.valueOf(text);
         }
         return Long.valueOf(String.valueOf(value));
-    }
-
-    private String normalizeEmail(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value.trim().toLowerCase();
-    }
-
-    private String valueOrFallback(String value, String fallback) {
-        if (value == null || value.isBlank()) {
-            return fallback;
-        }
-        return value.trim();
     }
 
     private String toByteaLiteral(byte[] bytes) {

@@ -20,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 import com.fixitnow.fixitnow_backend.model.UserProfile;
 import com.fixitnow.fixitnow_backend.model.UserProfileRequest;
 import com.fixitnow.fixitnow_backend.service.ProfileService;
+import com.fixitnow.fixitnow_backend.util.StringUtils;
 
 @RestController
 @RequestMapping("/api/profile")
@@ -34,7 +35,7 @@ public class ProfileController {
 
     @GetMapping
     public ResponseEntity<?> getProfile(@RequestParam("email") String email) {
-        String normalizedEmail = normalizeEmail(email);
+        String normalizedEmail = StringUtils.normalizeEmail(email);
         if (normalizedEmail == null || normalizedEmail.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("message", "Email is required"));
         }
@@ -74,7 +75,7 @@ public class ProfileController {
             return ResponseEntity.badRequest().body(Map.of("message", "Profile payload is required"));
         }
 
-        String normalizedEmail = normalizeEmail(request.getEmail());
+        String normalizedEmail = StringUtils.normalizeEmail(request.getEmail());
         if (request.getId() == null && (normalizedEmail == null || normalizedEmail.isBlank())) {
             return ResponseEntity.badRequest().body(Map.of("message", "User ID or email is required"));
         }
@@ -107,7 +108,7 @@ public class ProfileController {
             return ResponseEntity.badRequest().body(Map.of("message", "Only .jpg, .jpeg, and .png images are supported"));
         }
 
-        String normalizedEmail = normalizeEmail(email);
+        String normalizedEmail = StringUtils.normalizeEmail(email);
         if (userId == null && (normalizedEmail == null || normalizedEmail.isBlank())) {
             return ResponseEntity.badRequest().body(Map.of("message", "User ID or email is required"));
         }
@@ -134,11 +135,25 @@ public class ProfileController {
         }
     }
 
-    private String normalizeEmail(String value) {
-        if (value == null) {
-            return null;
+    private String buildFileReference(UserProfile profile) {
+        if (profile == null) {
+            return "profile-picture:unknown:image";
         }
-        return value.trim().toLowerCase();
+
+        String identity = profile.getId() != null
+                ? String.valueOf(profile.getId())
+                : StringUtils.normalizeEmail(profile.getEmail());
+
+        String profileImageName = profile.getProfileImageName();
+        String fileName = profileImageName == null || profileImageName.isBlank()
+                ? "image"
+                : profileImageName.trim();
+
+        if (identity == null || identity.isBlank()) {
+            identity = "unknown";
+        }
+
+        return "profile-picture:" + identity + ":" + fileName;
     }
 
     private String resolveIdentifierToEmail(String value) {
@@ -147,7 +162,7 @@ public class ProfileController {
         }
 
         String raw = value.trim().toLowerCase(Locale.ROOT);
-        String normalizedEmail = normalizeEmail(raw);
+        String normalizedEmail = StringUtils.normalizeEmail(raw);
 
         Optional<UserProfile> byEmail = profileService.getByEmail(normalizedEmail);
         if (byEmail.isPresent()) {
@@ -159,7 +174,7 @@ public class ProfileController {
                 .filter(profile -> profile.getUsername() != null && profile.getUsername().trim().equalsIgnoreCase(loginId))
                 .map(UserProfile::getEmail)
                 .filter(email -> email != null && !email.isBlank())
-                .map(this::normalizeEmail)
+                .map(StringUtils::normalizeEmail)
                 .findFirst()
                 .orElse(normalizedEmail);
     }
@@ -173,27 +188,6 @@ public class ProfileController {
         String originalName = rawOriginalName == null ? "" : rawOriginalName.toLowerCase(Locale.ROOT);
         boolean allowedExtension = originalName.endsWith(".jpg") || originalName.endsWith(".jpeg") || originalName.endsWith(".png");
 
-        return allowedType || allowedExtension;
-    }
-
-    private String buildFileReference(UserProfile profile) {
-        if (profile == null) {
-            return "profile-picture:unknown:image";
-        }
-
-        String identity = profile.getId() != null
-                ? String.valueOf(profile.getId())
-                : normalizeEmail(profile.getEmail());
-
-        String profileImageName = profile.getProfileImageName();
-        String fileName = profileImageName == null || profileImageName.isBlank()
-                ? "image"
-                : profileImageName.trim();
-
-        if (identity == null || identity.isBlank()) {
-            identity = "unknown";
-        }
-
-        return "profile-picture:" + identity + ":" + fileName;
+        return allowedType && allowedExtension;
     }
 }

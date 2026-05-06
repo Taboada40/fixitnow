@@ -9,6 +9,7 @@ import com.fixitnow.fixitnow_backend.model.UserProfile;
 import com.fixitnow.fixitnow_backend.model.UserProfileRequest;
 import com.fixitnow.fixitnow_backend.model.UserRequest;
 import com.fixitnow.fixitnow_backend.repository.SupabaseProfileRepository;
+import com.fixitnow.fixitnow_backend.util.StringUtils;
 
 @Service
 public class ProfileService {
@@ -24,10 +25,10 @@ public class ProfileService {
         UserProfile profile = existing.orElseGet(UserProfile::new);
 
         profile.setEmail(request.getEmail());
-        profile.setUsername(valueOrFallback(request.getUsername(), request.getEmail()));
-        profile.setFirstName(valueOrFallback(request.getFirstName(), "First"));
-        profile.setLastName(valueOrFallback(request.getLastName(), "Last"));
-        profile.setRole(valueOrFallback(profile.getRole(), "STUDENT").toUpperCase());
+        profile.setUsername(StringUtils.valueOrFallback(request.getUsername(), request.getEmail()));
+        profile.setFirstName(StringUtils.valueOrFallback(request.getFirstName(), "First"));
+        profile.setLastName(StringUtils.valueOrFallback(request.getLastName(), "Last"));
+        profile.setRole(StringUtils.valueOrFallback(profile.getRole(), "STUDENT").toUpperCase());
         profile.setPhoneNumber(request.getPhoneNumber());
 
         return profileRepository.upsert(profile);
@@ -48,7 +49,7 @@ public class ProfileService {
     public UserProfile updateProfile(UserProfileRequest request) {
         UserProfile profile = resolveProfileForUpdate(request);
 
-        String normalizedEmail = valueOrFallback(request.getEmail(), profile.getEmail());
+        String normalizedEmail = StringUtils.valueOrFallback(request.getEmail(), profile.getEmail());
         if (normalizedEmail == null || normalizedEmail.isBlank()) {
             throw new IllegalArgumentException("Email is required to update profile");
         }
@@ -57,7 +58,7 @@ public class ProfileService {
         profile.setUsername(mergeValue(request.getUsername(), profile.getUsername(), normalizedEmail));
         profile.setFirstName(mergeValue(request.getFirstName(), profile.getFirstName(), "First"));
         profile.setLastName(mergeValue(request.getLastName(), profile.getLastName(), "Last"));
-        profile.setRole(valueOrFallback(profile.getRole(), "STUDENT").toUpperCase());
+        profile.setRole(StringUtils.valueOrFallback(profile.getRole(), "STUDENT").toUpperCase());
         profile.setPhoneNumber(mergeOptionalPhone(request.getPhoneNumber(), profile.getPhoneNumber()));
 
         return profileRepository.upsert(profile);
@@ -68,9 +69,9 @@ public class ProfileService {
                 .orElseGet(UserProfile::new);
 
         profile.setEmail(email);
-        profile.setUsername(valueOrFallback(profile.getUsername(), valueOrFallback(username, email)));
-        profile.setFirstName(valueOrFallback(profile.getFirstName(), valueOrFallback(firstName, "Admin")));
-        profile.setLastName(valueOrFallback(profile.getLastName(), valueOrFallback(lastName, "User")));
+        profile.setUsername(StringUtils.valueOrFallback(profile.getUsername(), StringUtils.valueOrFallback(username, email)));
+        profile.setFirstName(StringUtils.valueOrFallback(profile.getFirstName(), StringUtils.valueOrFallback(firstName, "Admin")));
+        profile.setLastName(StringUtils.valueOrFallback(profile.getLastName(), StringUtils.valueOrFallback(lastName, "User")));
         profile.setRole("ADMIN");
 
         return profileRepository.upsert(profile);
@@ -80,16 +81,16 @@ public class ProfileService {
         UserProfile profile = profileRepository.findByEmail(email)
                 .orElseGet(UserProfile::new);
 
-        String normalizedEmail = valueOrFallback(email, "").toLowerCase();
+        String normalizedEmail = StringUtils.valueOrFallback(email, "").toLowerCase();
         String defaultUsername = normalizedEmail.contains("@")
                 ? normalizedEmail.substring(0, normalizedEmail.indexOf('@'))
                 : normalizedEmail;
 
         profile.setEmail(normalizedEmail);
-        profile.setUsername(valueOrFallback(profile.getUsername(), valueOrFallback(defaultUsername, normalizedEmail)));
-        profile.setFirstName(valueOrFallback(profile.getFirstName(), "First"));
-        profile.setLastName(valueOrFallback(profile.getLastName(), "Last"));
-        profile.setRole(valueOrFallback(profile.getRole(), "STUDENT").toUpperCase());
+        profile.setUsername(StringUtils.valueOrFallback(profile.getUsername(), StringUtils.valueOrFallback(defaultUsername, normalizedEmail)));
+        profile.setFirstName(StringUtils.valueOrFallback(profile.getFirstName(), "First"));
+        profile.setLastName(StringUtils.valueOrFallback(profile.getLastName(), "Last"));
+        profile.setRole(StringUtils.valueOrFallback(profile.getRole(), "STUDENT").toUpperCase());
 
         return profileRepository.upsert(profile);
     }
@@ -105,13 +106,6 @@ public class ProfileService {
         profile.setProfileImageContentType(contentType);
 
         return profileRepository.upsert(profile);
-    }
-
-    private String valueOrFallback(String value, String fallback) {
-        if (value == null || value.isBlank()) {
-            return fallback;
-        }
-        return value.trim();
     }
 
     private String mergeValue(String requestedValue, String existingValue, String fallback) {

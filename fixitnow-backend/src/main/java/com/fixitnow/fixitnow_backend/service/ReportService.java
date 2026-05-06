@@ -5,6 +5,7 @@ import com.fixitnow.fixitnow_backend.model.ReportRequest;
 import com.fixitnow.fixitnow_backend.model.UserProfile;
 import com.fixitnow.fixitnow_backend.model.UserDashboardSummary;
 import com.fixitnow.fixitnow_backend.repository.SupabaseReportRepository;
+import com.fixitnow.fixitnow_backend.util.StringUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -42,7 +43,7 @@ public class ReportService {
 
         ReportItem item = new ReportItem();
         item.setUserId(user.getId());
-        item.setEmail(normalizeEmail(user.getEmail()));
+        item.setEmail(StringUtils.normalizeEmail(user.getEmail()));
         String normalizedDescription = normalizeDescription(request.getDescription());
         String normalizedLocation = normalizeLocation(request.getLocation());
         item.setTitle(normalizeTitle(request.getTitle(), normalizedDescription, normalizedLocation));
@@ -84,14 +85,6 @@ public class ReportService {
 
     public boolean deleteReport(Long id, Long userId) {
         return reportRepository.deleteByIdAndUserId(id, userId);
-    }
-
-    private String normalizeEmail(String value) {
-        if (value == null) {
-            return null;
-        }
-        String input = value.trim().toLowerCase();
-        return input;
     }
 
     private String normalizeTitle(String value, String description, String location) {
