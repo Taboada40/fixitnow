@@ -1,20 +1,21 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { API_BASE, getErrorMessage } from '../utils/constants';
+import { getErrorMessage } from '../utils/constants';
+import { apiDelete, apiGet, useSession } from '../utils/profileSession';
 
 const ReportHistory = () => {
     const navigate = useNavigate();
-    const storedSession = useMemo(() => JSON.parse(localStorage.getItem('session') || 'null'), []);
-    const role = (storedSession?.profile?.role || 'STUDENT').toUpperCase();
-    const userId = storedSession?.profile?.id;
+    const session = useSession();
+    const profile = session?.profile || {};
+    const role = (profile?.role || 'STUDENT').toUpperCase();
+    const userId = profile?.id;
 
     const [reports, setReports] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
     useEffect(() => {
-        if (!storedSession) {
+        if (!session) {
             navigate('/login');
             return;
         }
@@ -31,9 +32,7 @@ const ReportHistory = () => {
             }
 
             try {
-                const res = await axios.get(`${API_BASE}/api/reports?userId=${encodeURIComponent(userId)}`, {
-                    withCredentials: true
-                });
+                const res = await apiGet('/api/reports', { params: { userId } });
                 setReports(Array.isArray(res.data) ? res.data : []);
             } catch (err) {
                 const message = getErrorMessage(err, 'Failed to load report history.');
@@ -44,7 +43,7 @@ const ReportHistory = () => {
         };
 
         fetchReports();
-    }, [storedSession, navigate, userId, role]);
+    }, [session, navigate, userId, role]);
 
     const deleteReport = async (id) => {
         if (!userId) {
@@ -52,19 +51,12 @@ const ReportHistory = () => {
         }
 
         try {
-            await axios.delete(`${API_BASE}/api/reports/${id}?userId=${encodeURIComponent(userId)}`, {
-                withCredentials: true
-            });
+            await apiDelete(`/api/reports/${id}`, { params: { userId } });
             setReports((prev) => prev.filter((item) => item.id !== id));
         } catch (err) {
             const message = getErrorMessage(err, 'Failed to delete report.');
             setError(message);
         }
-    };
-
-    const handleLogout = () => {
-        localStorage.removeItem('session');
-        navigate('/login');
     };
 
     const fixedReports = reports.filter((item) => String(item.status || '').toLowerCase() === 'fixed');
@@ -74,14 +66,8 @@ const ReportHistory = () => {
             <div className="profile-card">
                 <div className="profile-top">
                     <div>
-                        <h2>Report History</h2>
+                        <h2 className="ui-page-title">Report History</h2>
                         <p>Showing fixed reports only</p>
-                    </div>
-                    <div className="profile-top-actions">
-                        <button className="profile-nav-btn" onClick={() => navigate('/dashboard')}>Dashboard</button>
-                        <button className="profile-nav-btn" onClick={() => navigate('/notifications')}>Notifications</button>
-                        <button className="profile-nav-btn" onClick={() => navigate('/profile')}>Profile</button>
-                        <button className="profile-nav-btn danger" onClick={handleLogout}>Logout</button>
                     </div>
                 </div>
 
@@ -100,7 +86,7 @@ const ReportHistory = () => {
                                     <div className="reports-meta">Location: {item.location || 'Unspecified'} | Status: {item.status} | Created: {new Date(item.createdAt).toLocaleString()}</div>
                                 </div>
                                 <button
-                                    className="reports-delete-btn"
+                                    className="ui-button ui-button--danger"
                                     type="button"
                                     onClick={() => deleteReport(item.id)}
                                     aria-label={`Delete report ${item.title || item.description}`}

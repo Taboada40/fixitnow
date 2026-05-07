@@ -1,79 +1,38 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import axios from 'axios';
+import React, { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { API_BASE } from '../utils/constants';
+import {
+    apiPost,
+    apiPut,
+    fetchLatestSessionProfile,
+    mergeSessionProfile as persistProfileSession,
+    useSession,
+    resolveSessionProfileIdentifier
+} from '../utils/profileSession';
 
 const buildProfileImageSrc = (profile) => {
-    if (!profile?.profileImage) {
-        return '';
-    }
-
-    const contentType = profile.profileImageContentType || 'image/jpeg';
-    return `data:${contentType};base64,${profile.profileImage}`;
+    // Use only profileImageUrl as the single source of truth
+    return profile?.profileImageUrl || '';
 };
 
 const getInitials = (firstName, lastName, username) => {
-    const first = (firstName || '').trim();
-    const last = (lastName || '').trim();
-    if (first || last) {
-        return `${first.charAt(0)}${last.charAt(0)}`.toUpperCase() || 'U';
+    if (firstName && lastName) {
+        return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
     }
-
-    const user = (username || '').trim();
-    return user ? user.charAt(0).toUpperCase() : 'U';
-};
-
-const buildFileReferenceFromProfile = (profile) => {
-    if (!profile) {
-        return '';
+    if (username && username.length > 0) {
+        return username.substring(0, 2).toUpperCase();
     }
-
-    const identity = profile.id || profile.email;
-    const fileName = profile.profileImageName || 'image';
-    if (!identity || !profile.profileImage) {
-        return '';
-    }
-
-    return `profile-picture:${identity}:${fileName}`;
-};
-
-const mergeSessionProfile = (sessionSnapshot, profile) => {
-    const snapshot = sessionSnapshot || {};
-    const mergedProfile = {
-        ...(snapshot.profile || {}),
-        ...(profile || {})
-    };
-
-    return {
-        ...snapshot,
-        profile: mergedProfile,
-        session: snapshot.session
-            ? {
-                ...snapshot.session,
-                user: snapshot.session.user
-                    ? {
-                        ...snapshot.session.user,
-                        user_metadata: {
-                            ...(snapshot.session.user.user_metadata || {}),
-                            first_name: mergedProfile.firstName || '',
-                            last_name: mergedProfile.lastName || '',
-                            username: mergedProfile.username || '',
-                            phone_number: mergedProfile.phoneNumber || ''
-                        }
-                    }
-                    : snapshot.session.user
-            }
-            : snapshot.session
-    };
+    return '';
 };
 
 const Profile = () => {
     const navigate = useNavigate();
-    const storedSession = useMemo(() => JSON.parse(localStorage.getItem('session') || 'null'), []);
-    const authSession = storedSession?.session || storedSession;
-    const role = (storedSession?.profile?.role || 'STUDENT').toUpperCase();
-    const authenticatedEmail = authSession?.user?.email || storedSession?.profile?.email || '';
-    const authenticatedUserId = storedSession?.profile?.id || null;
+    const session = useSession();
+    
+    const storedProfile = session?.profile || {};
+    const authSession = session?.session || session || {};
+    const role = useMemo(() => (storedProfile?.role || '').toUpperCase(), [storedProfile?.role]);
+    const authenticatedEmail = useMemo(() => authSession?.user?.email || storedProfile?.email || '', [authSession?.user?.email, storedProfile?.email]);
+    const authenticatedUserId = useMemo(() => storedProfile?.id || null, [storedProfile?.id]);
 
     const [formData, setFormData] = useState({
         firstName: '',
@@ -81,120 +40,112 @@ const Profile = () => {
         username: '',
         email: '',
         phoneNumber: '',
-        profileImage: '',
-        profileImageName: '',
-        profileImageContentType: ''
-    });
-    const [loading, setLoading] = useState(true);
-    const [saving, setSaving] = useState(false);
-    const [error, setError] = useState('');
-    const [success, setSuccess] = useState('');
-    const [profileId, setProfileId] = useState(authenticatedUserId);
-    const [uploadingImage, setUploadingImage] = useState(false);
-    const [fileReference, setFileReference] = useState('');
-    const [changingPassword, setChangingPassword] = useState(false);
-    const [passwordForm, setPasswordForm] = useState({
+        profileImageUrl: '',
         currentPassword: '',
         newPassword: '',
         confirmPassword: ''
     });
+
+    const [profileId, setProfileId] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [uploadingImage, setUploadingImage] = useState(false);
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
     const imageInputRef = useRef(null);
 
     const persistSessionAndForm = useCallback((profile) => {
         const latestProfile = profile || {};
-        setProfileId(latestProfile.id || profileId || authenticatedUserId || null);
+        const newProfileId = latestProfile.id || authenticatedUserId;
+        setProfileId(newProfileId);
 
-        const updatedFormData = {
-            firstName: latestProfile.firstName || '',
-            lastName: latestProfile.lastName || '',
-            username: latestProfile.username || '',
-            email: latestProfile.email || authenticatedEmail,
-            phoneNumber: latestProfile.phoneNumber || '',
-            profileImage: latestProfile.profileImage || '',
-            profileImageName: latestProfile.profileImageName || '',
-            profileImageContentType: latestProfile.profileImageContentType || ''
-        };
+        setFormData((prev) => ({
+            ...prev,
+            firstName: latestProfile.firstName ?? prev.firstName,
+            lastName: latestProfile.lastName ?? prev.lastName,
+            username: latestProfile.username ?? prev.username,
+            email: latestProfile.email ?? prev.email,
+            phoneNumber: latestProfile.phoneNumber ?? prev.phoneNumber,
+            profileImageUrl: latestProfile.profileImageUrl ?? prev.profileImageUrl,
+            currentPassword: '',
+            newPassword: '',
+            confirmPassword: ''
+        }));
 
-        setFormData(updatedFormData);
-        setFileReference(buildFileReferenceFromProfile(latestProfile));
-
-        const latestSession = JSON.parse(localStorage.getItem('session') || 'null');
-        const updatedSession = mergeSessionProfile(latestSession, latestProfile);
-        localStorage.setItem('session', JSON.stringify(updatedSession));
-
-        window.dispatchEvent(new CustomEvent('profileUpdated', { detail: updatedFormData }));
-    }, [profileId, authenticatedUserId, authenticatedEmail]);
-
-    const fetchCanonicalProfile = useCallback(async (profileHint = null) => {
-        const hintId = profileHint?.id || profileId || authenticatedUserId;
-        const hintEmail = (profileHint?.email || formData.email || authenticatedEmail || '').trim();
-
-        try {
-            if (hintId) {
-                const byId = await axios.get(
-                    `${API_BASE}/api/profile/by-id?userId=${encodeURIComponent(hintId)}&_ts=${Date.now()}`,
-                    { withCredentials: true, timeout: 3000 }
-                );
-                return byId.data || profileHint;
-            }
-
-            if (hintEmail) {
-                const byIdentifier = await axios.get(
-                    `${API_BASE}/api/profile/authenticated?identifier=${encodeURIComponent(hintEmail)}&_ts=${Date.now()}`,
-                    { withCredentials: true, timeout: 3000 }
-                );
-                return byIdentifier.data || profileHint;
-            }
-        } catch (err) {
-            console.warn('Failed to fetch canonical profile, using hint:', err.message);
-        }
-
-        return profileHint;
-    }, [profileId, authenticatedUserId, formData.email, authenticatedEmail]);
+        persistProfileSession(latestProfile);
+    }, [authenticatedUserId]);
 
     const saveProfile = useCallback(async () => {
-        const effectiveEmail = (formData.email || authenticatedEmail || '').trim();
-        const payload = {
+        const effectiveEmail = (authenticatedEmail || formData.email || '').trim();
+        const profilePayload = {
             id: profileId || authenticatedUserId || null,
             email: effectiveEmail,
-            firstName: formData.firstName,
-            lastName: formData.lastName,
-            username: formData.username,
-            phoneNumber: formData.phoneNumber
+            username: (formData.username || '').trim(),
+            firstName: formData.firstName.trim(),
+            lastName: formData.lastName.trim(),
+            phoneNumber: formData.phoneNumber.trim(),
+            role: 'STUDENT'
         };
 
-        if (!payload.id && !payload.email) {
-            setError('Unable to update profile. Please log in again.');
+        const profileRes = await apiPut('/api/profile', profilePayload);
+        const savedProfile = profileRes.data?.profile || profileRes.data || profilePayload;
+        const latestProfile = await fetchLatestSessionProfile({
+            profileId: savedProfile?.id || profilePayload.id,
+            identifier: savedProfile?.email || effectiveEmail
+        });
+        persistSessionAndForm(latestProfile);
+    }, [formData, authenticatedEmail, profileId, authenticatedUserId, persistSessionAndForm]);
+
+    const updatePassword = useCallback(async () => {
+        const passwordPayload = {
+            currentPassword: formData.currentPassword,
+            newPassword: formData.newPassword
+        };
+
+        await apiPost('/api/auth/password', passwordPayload);
+        setFormData(prev => ({ ...prev, currentPassword: '', newPassword: '', confirmPassword: '' }));
+    }, [formData]);
+
+    useEffect(() => {
+        if (!session) {
+            navigate('/login');
+            return;
+        }
+        if (role === 'ADMIN') {
+            navigate('/admin/dashboard');
             return;
         }
 
-        setSaving(true);
-        setError('');
-        setSuccess('');
-
-        try {
-            const res = await axios.put(`${API_BASE}/api/profile`, payload, {
-                withCredentials: true
-            });
-
-            const persistedProfile = res.data || {};
-            const canonicalProfile = await fetchCanonicalProfile(persistedProfile);
-            persistSessionAndForm(canonicalProfile || persistedProfile);
-
-            setSuccess('Profile updated successfully.');
-            setTimeout(() => setSuccess(''), 4000);
-        } catch (err) {
-            const message = err.response?.data?.message || 'Failed to update profile.';
-            setError(message);
-            setTimeout(() => setError(''), 5000);
-        } finally {
-            setSaving(false);
+        const userId = authenticatedUserId;
+        if (!userId) {
+            setError('Unable to load profile. Please login again.');
+            setLoading(false);
+            return;
         }
-    }, [profileId, authenticatedUserId, authenticatedEmail, formData, persistSessionAndForm, fetchCanonicalProfile]);
 
-    const handleLogout = () => {
-        localStorage.removeItem('session');
-        navigate('/login');
+        const loadProfile = async () => {
+            try {
+                const refreshedProfile = await fetchLatestSessionProfile({
+                    profileId: userId,
+                    identifier: authenticatedEmail || resolveSessionProfileIdentifier()
+                });
+                persistSessionAndForm(refreshedProfile);
+            } catch (err) {
+                const message = err.response?.data?.message || 'Failed to load profile.';
+                setError(message);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadProfile();
+    }, [session, navigate, role, authenticatedUserId, authenticatedEmail, persistSessionAndForm]);
+
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setFormData(prev => ({ ...prev, [name]: value }));
+        if (error) setError('');
+        if (success) setSuccess('');
     };
 
     const triggerImagePicker = () => {
@@ -205,6 +156,10 @@ const Profile = () => {
     };
 
     const handleProfileImageUpload = async (event) => {
+        if (uploadingImage || saving) {
+            return;
+        }
+        
         const file = event.target.files?.[0];
         event.target.value = '';
 
@@ -222,9 +177,8 @@ const Profile = () => {
             return;
         }
 
-        const effectiveEmail = (formData.email || authenticatedEmail || '').trim();
-
-        if (!(profileId || authenticatedUserId) && !effectiveEmail) {
+        const activeProfileId = profileId || authenticatedUserId || null;
+        if (!activeProfileId) {
             setError('Unable to upload picture. Please log in again.');
             setSuccess('');
             return;
@@ -237,24 +191,16 @@ const Profile = () => {
         try {
             const uploadPayload = new FormData();
             uploadPayload.append('file', file);
-            if (profileId || authenticatedUserId) {
-                uploadPayload.append('userId', String(profileId || authenticatedUserId));
-            }
-            uploadPayload.append('email', effectiveEmail);
+            uploadPayload.append('userId', String(activeProfileId));
 
-            const uploadRes = await axios.post(`${API_BASE}/api/profile/picture`, uploadPayload, {
-                withCredentials: true,
-                headers: {
-                    'Content-Type': 'multipart/form-data'
-                }
+            const uploadRes = await apiPost('/api/profile/picture', uploadPayload);
+
+            const uploadedProfile = uploadRes.data?.profile || uploadRes.data || {};
+            const latestProfile = await fetchLatestSessionProfile({
+                profileId: uploadedProfile?.id || activeProfileId,
+                identifier: uploadedProfile?.email || authenticatedEmail || formData.email
             });
-
-            const uploadedProfile = uploadRes.data?.profile || {};
-            const reference = uploadRes.data?.fileReference || '';
-
-            const canonicalProfile = await fetchCanonicalProfile(uploadedProfile);
-            persistSessionAndForm(canonicalProfile || uploadedProfile);
-            setFileReference(reference);
+            persistSessionAndForm(latestProfile);
             setSuccess(uploadRes.data?.message || 'Profile picture uploaded successfully.');
             setTimeout(() => setSuccess(''), 4000);
         } catch (err) {
@@ -266,122 +212,58 @@ const Profile = () => {
         }
     };
 
-    useEffect(() => {
-        if (!storedSession) {
-            navigate('/login');
-            return;
-        }
-        if (role === 'ADMIN') {
-            navigate('/admin/dashboard');
-            return;
-        }
-
-        const email = authenticatedEmail;
-        const userId = authenticatedUserId;
-        if (!email && !userId) {
-            setError('Unable to load profile. Please login again.');
-            setLoading(false);
-            return;
-        }
-
-        const loadProfile = async () => {
-            try {
-                const res = userId
-                    ? await axios.get(`${API_BASE}/api/profile/by-id?userId=${encodeURIComponent(userId)}`, {
-                        withCredentials: true
-                    })
-                    : await axios.get(`${API_BASE}/api/profile/authenticated?identifier=${encodeURIComponent(email)}`, {
-                        withCredentials: true
-                    });
-
-                const refreshedProfile = res.data || {};
-                persistSessionAndForm(refreshedProfile);
-            } catch (err) {
-                const message = err.response?.data?.message || 'Failed to load profile.';
-                setError(message);
-                const userMeta = authSession?.user?.user_metadata || {};
-                const fallbackProfile = {
-                    firstName: userMeta.first_name || '',
-                    lastName: userMeta.last_name || '',
-                    username: userMeta.username || '',
-                    email,
-                    phoneNumber: userMeta.phone_number || '',
-                    profileImage: '',
-                    profileImageName: '',
-                    profileImageContentType: ''
-                };
-                setFormData(fallbackProfile);
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        loadProfile();
-    }, [storedSession, authSession, navigate, role, authenticatedEmail, authenticatedUserId, persistSessionAndForm]);
-
     const handleSave = async (e) => {
         e.preventDefault();
         setError('');
         setSuccess('');
-        await saveProfile();
-    };
+        setSaving(true);
 
-    const handlePasswordChange = async (e) => {
-        e.preventDefault();
-        setError('');
-        setSuccess('');
-
-        if (!passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword) {
-            setError('Please complete all password fields.');
-            return;
-        }
-
-        if (passwordForm.newPassword.length < 6) {
-            setError('New password must be at least 6 characters.');
-            return;
-        }
-
-        if (passwordForm.newPassword !== passwordForm.confirmPassword) {
-            setError('New password and confirmation do not match.');
-            return;
-        }
-
-        setChangingPassword(true);
         try {
-            const res = await axios.put(`${API_BASE}/api/auth/password`, {
-                email: authenticatedEmail,
-                currentPassword: passwordForm.currentPassword,
-                newPassword: passwordForm.newPassword
-            }, {
-                withCredentials: true
-            });
+            await saveProfile();
 
-            setSuccess(res.data?.message || 'Password updated successfully.');
-            setPasswordForm({
-                currentPassword: '',
-                newPassword: '',
-                confirmPassword: ''
-            });
-        } catch (err) {
-            let message = err.response?.data?.message || 'Failed to update password.';
-            if (typeof err.response?.data === 'string') {
-                try {
-                    const parsed = JSON.parse(err.response.data);
-                    message = parsed?.error_description || parsed?.message || message;
-                } catch (_) {
-                    message = err.response.data || message;
-                }
+            const hasPasswordChange = formData.newPassword.trim().length > 0;
+            if (hasPasswordChange) {
+                await updatePassword();
             }
+
+            setSuccess('All changes saved successfully.');
+            setTimeout(() => setSuccess(''), 4000);
+        } catch (err) {
+            const message = err.message || 'Failed to save changes.';
             setError(message);
+            setTimeout(() => setError(''), 5000);
         } finally {
-            setChangingPassword(false);
+            setSaving(false);
         }
     };
+
+    const profileImageSrc = useMemo(() => {
+        return buildProfileImageSrc(formData);
+    }, [formData]);
+    
+    const initials = useMemo(() => {
+        return getInitials(formData.firstName, formData.lastName, formData.username);
+    }, [formData.firstName, formData.lastName, formData.username]);
 
     if (loading) {
         return (
             <div className="profile-page">
-                <div className="profile-card">Loading profile...</div>
+                <div className="profile-card profile-loading-card" aria-busy="true" aria-live="polite">
+                    <div className="profile-skeleton-header">
+                        <div className="profile-skeleton-avatar" />
+                        <div className="profile-skeleton-meta">
+                            <div className="profile-skeleton-line profile-skeleton-line-title" />
+                            <div className="profile-skeleton-line profile-skeleton-line-subtitle" />
+                        </div>
+                    </div>
+                    <div className="profile-skeleton-grid">
+                        <div className="profile-skeleton-field" />
+                        <div className="profile-skeleton-field" />
+                        <div className="profile-skeleton-field" />
+                        <div className="profile-skeleton-field" />
+                    </div>
+                    <p className="profile-sync-hint">Synchronizing profile from Supabase...</p>
+                </div>
             </div>
         );
     }
@@ -398,15 +280,16 @@ const Profile = () => {
                             disabled={uploadingImage || saving}
                             aria-label="Change profile picture"
                         >
-                            {buildProfileImageSrc(formData) ? (
+                            {profileImageSrc ? (
                                 <img
-                                    src={buildProfileImageSrc(formData)}
+                                    key={formData.profileImageUrl}
+                                    src={profileImageSrc}
                                     alt="Profile"
                                     className="profile-avatar-img"
                                 />
                             ) : (
                                 <span className="profile-avatar-fallback">
-                                    {getInitials(formData.firstName, formData.lastName, formData.username)}
+                                    {initials}
                                 </span>
                             )}
                             <span className="profile-avatar-overlay">
@@ -418,117 +301,141 @@ const Profile = () => {
                             type="file"
                             accept=".jpg,.jpeg,.png,image/png,image/jpeg"
                             onChange={handleProfileImageUpload}
-                            className="profile-avatar-input"
+                            style={{ display: 'none' }}
                         />
-                        <div>
-                            <h2>Profile Information</h2>
-                            <p>Manage your personal details</p>
-                            <p className="profile-avatar-hint">Click your profile picture to change it (.jpg, .png)</p>
-                            {fileReference && <p className="profile-avatar-ref">File ref: {fileReference}</p>}
+                        <div className="profile-identity-info">
+                            <h2 className="profile-display-name">
+                                {formData.firstName && formData.lastName
+                                    ? `${formData.firstName} ${formData.lastName}`
+                                    : formData.username || ''}
+                            </h2>
+                            <p className="profile-display-email">{formData.email || ''}</p>
+                            <span className={`profile-role-badge ${role.toLowerCase()}`}>{role}</span>
                         </div>
                     </div>
-                    <div className="profile-top-actions">
-                        <button className="profile-nav-btn" onClick={() => navigate('/dashboard')}>Dashboard</button>
-                        <button className="profile-nav-btn" onClick={() => navigate('/reports')}>Report History</button>
-                        <button className="profile-nav-btn danger" onClick={handleLogout}>Logout</button>
-                    </div>
+                    {error && <div className="error-msg">{error}</div>}
+                    {success && <div className="success-msg">{success}</div>}
                 </div>
 
-                {error && <div className="error-msg">{error}</div>}
-                {success && <div className="success-msg">{success}</div>}
-                <form onSubmit={handleSave}>
-                    <div className="form-row">
-                        <div className="form-group">
-                            <label>First Name</label>
+                <form className="profile-form" onSubmit={handleSave}>
+                        <div className="profile-form-grid">
+                        <div className="profile-form-field">
+                            <label htmlFor="firstName">First Name</label>
                             <input
+                                id="firstName"
+                                    className="ui-input"
+                                name="firstName"
                                 type="text"
-                                required
                                 value={formData.firstName}
-                                onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
+                                onChange={handleChange}
+                                disabled={saving}
                             />
                         </div>
-                        <div className="form-group">
-                            <label>Last Name</label>
+                        <div className="profile-form-field">
+                            <label htmlFor="lastName">Last Name</label>
                             <input
+                                id="lastName"
+                                    className="ui-input"
+                                name="lastName"
                                 type="text"
-                                required
                                 value={formData.lastName}
-                                onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
+                                onChange={handleChange}
+                                disabled={saving}
                             />
                         </div>
-                    </div>
-
-                    <div className="form-row">
-                        <div className="form-group">
-                            <label>Email</label>
-                            <input type="email" value={authenticatedEmail || formData.email} readOnly />
-                        </div>
-                        <div className="form-group">
-                            <label>Username</label>
+                        <div className="profile-form-field">
+                            <label htmlFor="username">Username</label>
                             <input
+                                id="username"
+                                className="ui-input"
+                                name="username"
                                 type="text"
-                                required
                                 value={formData.username}
-                                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                                onChange={handleChange}
+                                disabled
                             />
                         </div>
-                    </div>
-
-                    <div className="form-group">
-                        <label>Phone Number</label>
-                        <input
-                            type="text"
-                            value={formData.phoneNumber}
-                            onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-                        />
-                    </div>
-
-                    <button className="btn-builder" type="submit" disabled={saving}>
-                        {saving ? 'Updating...' : 'Update Profile'}
-                    </button>
-                </form>
-
-                <div className="profile-password-panel">
-                    <h3>Change Password</h3>
-                    <p>Use your current password to set a new one.</p>
-
-                    <form onSubmit={handlePasswordChange}>
-                        <div className="form-row">
-                            <div className="form-group">
-                                <label>Current Password</label>
-                                <input
-                                    type="password"
-                                    required
-                                    value={passwordForm.currentPassword}
-                                    onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label>New Password</label>
-                                <input
-                                    type="password"
-                                    required
-                                    value={passwordForm.newPassword}
-                                    onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
-                                />
-                            </div>
-                        </div>
-
-                        <div className="form-group">
-                            <label>Confirm New Password</label>
+                        <div className="profile-form-field">
+                            <label htmlFor="email">Email</label>
                             <input
-                                type="password"
-                                required
-                                value={passwordForm.confirmPassword}
-                                onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                                id="email"
+                                className="ui-input"
+                                name="email"
+                                type="email"
+                                value={formData.email}
+                                onChange={handleChange}
+                                disabled
                             />
                         </div>
+                        <div className="profile-form-field">
+                            <label htmlFor="phoneNumber">Phone Number</label>
+                            <input
+                                id="phoneNumber"
+                                    className="ui-input"
+                                name="phoneNumber"
+                                type="tel"
+                                value={formData.phoneNumber}
+                                onChange={handleChange}
+                                disabled={saving}
+                            />
+                        </div>
+                    </div>
 
-                        <button className="btn-builder" type="submit" disabled={changingPassword}>
-                            {changingPassword ? 'Updating Password...' : 'Update Password'}
+                    <div className="profile-password-divider">
+                        <h3 className="ui-section-title">Change Password</h3>
+                        <div className="profile-form-grid">
+                            <div className="profile-form-field">
+                                <label htmlFor="currentPassword">Current Password</label>
+                                <input
+                                    id="currentPassword"
+                                    className="ui-input"
+                                    name="currentPassword"
+                                    type="password"
+                                    value={formData.currentPassword}
+                                    onChange={handleChange}
+                                    disabled={saving}
+                                    placeholder="Current password"
+                                />
+                            </div>
+                            <div className="profile-form-field">
+                                <label htmlFor="newPassword">New Password</label>
+                                <input
+                                    id="newPassword"
+                                    className="ui-input"
+                                    name="newPassword"
+                                    type="password"
+                                    value={formData.newPassword}
+                                    onChange={handleChange}
+                                    disabled={saving}
+                                    placeholder="New password"
+                                />
+                            </div>
+                            <div className="profile-form-field">
+                                <label htmlFor="confirmPassword">Confirm New Password</label>
+                                <input
+                                    id="confirmPassword"
+                                    className="ui-input"
+                                    name="confirmPassword"
+                                    type="password"
+                                    value={formData.confirmPassword}
+                                    onChange={handleChange}
+                                    disabled={saving}
+                                    placeholder="Confirm new password"
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="profile-top-actions">
+                        <button
+                            type="submit"
+                            className="profile-save-btn ui-button ui-button--primary"
+                            disabled={saving || uploadingImage}
+                        >
+                            {saving ? 'Saving...' : 'Save Changes'}
                         </button>
-                    </form>
-                </div>
+                    </div>
+                </form>
             </div>
         </div>
     );

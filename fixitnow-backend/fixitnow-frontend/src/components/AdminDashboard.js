@@ -1,13 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { API_BASE, STATUS_OPTIONS, DEFAULT_ADMIN_EMAIL, getErrorMessage, normalizeStatus } from '../utils/constants';
+import { STATUS_OPTIONS, getErrorMessage, normalizeStatus } from '../utils/constants';
+import { apiGet, apiPut, useSession } from '../utils/profileSession';
 
 const AdminDashboard = () => {
     const navigate = useNavigate();
-    const storedSession = useMemo(() => JSON.parse(localStorage.getItem('session') || 'null'), []);
-    const role = (storedSession?.profile?.role || 'STUDENT').toUpperCase();
-    const adminEmail = storedSession?.profile?.email || storedSession?.session?.user?.email || DEFAULT_ADMIN_EMAIL;
+    const session = useSession();
+    const profile = session?.profile || {};
+    const role = (profile?.role || 'STUDENT').toUpperCase();
+    const adminUserId = profile?.id || null;
+    const adminEmail = profile?.email || session?.session?.user?.email || '';
+    const adminAccessParams = useMemo(
+        () => (adminUserId ? { adminUserId } : { adminEmail }),
+        [adminUserId, adminEmail]
+    );
 
     const [reports, setReports] = useState([]);
     const [summary, setSummary] = useState({
@@ -31,7 +37,7 @@ const AdminDashboard = () => {
     }, []);
 
     useEffect(() => {
-        if (!storedSession) {
+        if (!session) {
             navigate('/login');
             return;
         }
@@ -43,12 +49,8 @@ const AdminDashboard = () => {
         const loadDashboardData = async () => {
             try {
                 const [reportsRes, summaryRes] = await Promise.all([
-                    axios.get(`${API_BASE}/api/admin/reports?adminEmail=${encodeURIComponent(adminEmail || '')}`, {
-                        withCredentials: true
-                    }),
-                    axios.get(`${API_BASE}/api/admin/summary?adminEmail=${encodeURIComponent(adminEmail || '')}`, {
-                        withCredentials: true
-                    })
+                    apiGet('/api/admin/reports', { params: adminAccessParams }),
+                    apiGet('/api/admin/summary', { params: adminAccessParams })
                 ]);
 
                 setReports(Array.isArray(reportsRes.data) ? reportsRes.data : []);
@@ -67,13 +69,11 @@ const AdminDashboard = () => {
         };
 
         loadDashboardData();
-    }, [storedSession, role, adminEmail, navigate]);
+    }, [session, role, adminAccessParams, navigate]);
 
     const refreshSummary = async () => {
         try {
-            const summaryRes = await axios.get(`${API_BASE}/api/admin/summary?adminEmail=${encodeURIComponent(adminEmail || '')}`, {
-                withCredentials: true
-            });
+            const summaryRes = await apiGet('/api/admin/summary', { params: adminAccessParams });
             setSummary({
                 usersCount: summaryRes.data?.usersCount || 0,
                 reportsCount: summaryRes.data?.reportsCount || 0,
@@ -91,10 +91,11 @@ const AdminDashboard = () => {
         setSuccess('');
         setUpdatingId(reportId);
         try {
-            const res = await axios.put(`${API_BASE}/api/admin/reports/${reportId}/status`, {
+            const res = await apiPut(`/api/admin/reports/${reportId}/status`, {
+                adminUserId,
                 adminEmail,
                 status
-            }, { withCredentials: true });
+            });
 
             setReports((prev) => prev.map((item) => String(item.id) === String(reportId) ? res.data : item));
             await refreshSummary();
@@ -113,22 +114,13 @@ const AdminDashboard = () => {
         }
     };
 
-    const handleLogout = () => {
-        localStorage.removeItem('session');
-        navigate('/login');
-    };
-
     return (
         <div className="profile-page">
             <div className="profile-card admin-dashboard-card">
                 <div className="profile-top">
                     <div>
-                        <h2>Admin Dashboard</h2>
+                            <h2 className="ui-page-title">Admin Dashboard</h2>
                         <p>System overview and report review workflow</p>
-                    </div>
-                    <div className="profile-top-actions">
-                        <button className="profile-nav-btn" onClick={() => navigate('/admin/notifications')}>Notifications</button>
-                        <button className="profile-nav-btn danger" onClick={handleLogout}>Logout</button>
                     </div>
                 </div>
 
@@ -180,7 +172,7 @@ const AdminDashboard = () => {
                                                 <td>{item.location || 'Unspecified'}</td>
                                                 <td>
                                                     <select
-                                                        className="admin-status-select"
+                                                        className="admin-status-select ui-select"
                                                         value={normalizeStatus(item.status)}
                                                         disabled={updatingId === item.id}
                                                         onChange={(e) => handleStatusChange(item.id, e.target.value)}

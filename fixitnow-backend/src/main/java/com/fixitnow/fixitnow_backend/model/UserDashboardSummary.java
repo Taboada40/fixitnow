@@ -3,11 +3,20 @@ package com.fixitnow.fixitnow_backend.model;
 import java.time.LocalDateTime;
 
 public class UserDashboardSummary {
+    private Long userId;
     private String email;
     private long totalReports;
     private long resolvedReports;
     private long alertsCount;
     private LocalDateTime lastReportAt;
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public void setUserId(Long userId) {
+        this.userId = userId;
+    }
 
     public String getEmail() {
         return email;

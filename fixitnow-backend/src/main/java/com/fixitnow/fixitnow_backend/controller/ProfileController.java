@@ -7,7 +7,6 @@ import java.util.Optional;
 
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -21,10 +20,10 @@ import com.fixitnow.fixitnow_backend.model.UserProfile;
 import com.fixitnow.fixitnow_backend.model.UserProfileRequest;
 import com.fixitnow.fixitnow_backend.service.ProfileService;
 import com.fixitnow.fixitnow_backend.util.StringUtils;
+import com.fixitnow.fixitnow_backend.util.ValidationUtils;
 
 @RestController
 @RequestMapping("/api/profile")
-@CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true")
 public class ProfileController {
 
     private final ProfileService profileService;
@@ -42,7 +41,7 @@ public class ProfileController {
 
         return profileService.getByEmail(normalizedEmail)
                 .<ResponseEntity<?>>map(ResponseEntity::ok)
-            .orElseGet(() -> ResponseEntity.ok(profileService.ensureStudentProfile(normalizedEmail)));
+                .orElseGet(() -> ResponseEntity.status(404).body(Map.of("message", "Profile not found")));
     }
 
     @GetMapping("/authenticated")
@@ -53,8 +52,11 @@ public class ProfileController {
         }
 
         UserProfile profile = profileService.getByEmail(resolvedEmail)
-                .orElseGet(() -> profileService.ensureStudentProfile(resolvedEmail));
+                .orElse(null);
 
+        if (profile == null) {
+            return ResponseEntity.status(404).body(Map.of("message", "Profile not found"));
+        }
         return ResponseEntity.ok(profile);
     }
 
@@ -75,11 +77,11 @@ public class ProfileController {
             return ResponseEntity.badRequest().body(Map.of("message", "Profile payload is required"));
         }
 
-        String normalizedEmail = StringUtils.normalizeEmail(request.getEmail());
-        if (request.getId() == null && (normalizedEmail == null || normalizedEmail.isBlank())) {
-            return ResponseEntity.badRequest().body(Map.of("message", "User ID or email is required"));
+        if (request.getId() == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "User ID is required"));
         }
 
+        String normalizedEmail = StringUtils.normalizeEmail(request.getEmail());
         if (normalizedEmail != null && !normalizedEmail.isBlank()) {
             request.setEmail(normalizedEmail);
         } else {
@@ -97,7 +99,6 @@ public class ProfileController {
     @PostMapping(value = "/picture", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> uploadProfilePicture(
             @RequestParam(value = "userId", required = false) Long userId,
-            @RequestParam(value = "email", required = false) String email,
             @RequestParam("file") MultipartFile file
     ) {
         if (file == null || file.isEmpty()) {
@@ -108,15 +109,13 @@ public class ProfileController {
             return ResponseEntity.badRequest().body(Map.of("message", "Only .jpg, .jpeg, and .png images are supported"));
         }
 
-        String normalizedEmail = StringUtils.normalizeEmail(email);
-        if (userId == null && (normalizedEmail == null || normalizedEmail.isBlank())) {
-            return ResponseEntity.badRequest().body(Map.of("message", "User ID or email is required"));
+        if (userId == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "User ID is required"));
         }
 
         try {
             UserProfile profile = profileService.updateProfilePicture(
                     userId,
-                    normalizedEmail,
                     file.getOriginalFilename(),
                     file.getContentType(),
                     file.getBytes()
@@ -136,24 +135,11 @@ public class ProfileController {
     }
 
     private String buildFileReference(UserProfile profile) {
-        if (profile == null) {
+        if (profile == null || profile.getProfileImageUrl() == null || profile.getProfileImageUrl().isBlank()) {
             return "profile-picture:unknown:image";
         }
-
-        String identity = profile.getId() != null
-                ? String.valueOf(profile.getId())
-                : StringUtils.normalizeEmail(profile.getEmail());
-
-        String profileImageName = profile.getProfileImageName();
-        String fileName = profileImageName == null || profileImageName.isBlank()
-                ? "image"
-                : profileImageName.trim();
-
-        if (identity == null || identity.isBlank()) {
-            identity = "unknown";
-        }
-
-        return "profile-picture:" + identity + ":" + fileName;
+        // Return the public URL as-is (it's the single source of truth)
+        return profile.getProfileImageUrl();
     }
 
     private String resolveIdentifierToEmail(String value) {
@@ -164,11 +150,13 @@ public class ProfileController {
         String raw = value.trim().toLowerCase(Locale.ROOT);
         String normalizedEmail = StringUtils.normalizeEmail(raw);
 
+        // First try direct email lookup
         Optional<UserProfile> byEmail = profileService.getByEmail(normalizedEmail);
         if (byEmail.isPresent()) {
             return normalizedEmail;
         }
 
+        // If not found and contains @, try username lookup
         String loginId = raw.contains("@") ? raw.substring(0, raw.indexOf('@')) : raw;
         return profileService.listAllProfiles().stream()
                 .filter(profile -> profile.getUsername() != null && profile.getUsername().trim().equalsIgnoreCase(loginId))
@@ -180,14 +168,6 @@ public class ProfileController {
     }
 
     private boolean isAllowedImage(MultipartFile file) {
-        String rawContentType = file.getContentType();
-        String contentType = rawContentType == null ? "" : rawContentType.toLowerCase(Locale.ROOT);
-        boolean allowedType = contentType.equals("image/jpeg") || contentType.equals("image/jpg") || contentType.equals("image/png");
-
-        String rawOriginalName = file.getOriginalFilename();
-        String originalName = rawOriginalName == null ? "" : rawOriginalName.toLowerCase(Locale.ROOT);
-        boolean allowedExtension = originalName.endsWith(".jpg") || originalName.endsWith(".jpeg") || originalName.endsWith(".png");
-
-        return allowedType && allowedExtension;
+        return ValidationUtils.isAllowedImageType(file.getContentType(), file.getOriginalFilename());
     }
 }

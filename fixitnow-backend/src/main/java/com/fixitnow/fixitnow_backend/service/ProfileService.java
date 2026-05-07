@@ -1,6 +1,7 @@
 package com.fixitnow.fixitnow_backend.service;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 import org.springframework.stereotype.Service;
@@ -9,26 +10,39 @@ import com.fixitnow.fixitnow_backend.model.UserProfile;
 import com.fixitnow.fixitnow_backend.model.UserProfileRequest;
 import com.fixitnow.fixitnow_backend.model.UserRequest;
 import com.fixitnow.fixitnow_backend.repository.SupabaseProfileRepository;
+import com.fixitnow.fixitnow_backend.repository.UserRepository;
 import com.fixitnow.fixitnow_backend.util.StringUtils;
+import com.fixitnow.fixitnow_backend.util.ValidationUtils;
 
 @Service
 public class ProfileService {
 
     private final SupabaseProfileRepository profileRepository;
+    private final UserRepository userRepository;
 
-    public ProfileService(SupabaseProfileRepository profileRepository) {
+    public ProfileService(SupabaseProfileRepository profileRepository, UserRepository userRepository) {
         this.profileRepository = profileRepository;
+        this.userRepository = userRepository;
     }
 
     public UserProfile upsertFromRegistration(UserRequest request) {
-        Optional<UserProfile> existing = profileRepository.findByEmail(request.getEmail());
-        UserProfile profile = existing.orElseGet(UserProfile::new);
+        // Validate input
+        if (!ValidationUtils.isNotBlank(request.getEmail())) {
+            throw new IllegalArgumentException("Email is required for registration");
+        }
+        
+        // Always create a fresh profile for registration (do not merge with existing)
+        UserProfile profile = new UserProfile();
+        String normalizedEmail = StringUtils.normalizeEmail(request.getEmail());
+        String fallbackUsername = normalizedEmail != null && normalizedEmail.contains("@")
+                ? normalizedEmail.substring(0, normalizedEmail.indexOf('@'))
+                : normalizedEmail;
 
-        profile.setEmail(request.getEmail());
-        profile.setUsername(StringUtils.valueOrFallback(request.getUsername(), request.getEmail()));
-        profile.setFirstName(StringUtils.valueOrFallback(request.getFirstName(), "First"));
-        profile.setLastName(StringUtils.valueOrFallback(request.getLastName(), "Last"));
-        profile.setRole(StringUtils.valueOrFallback(profile.getRole(), "STUDENT").toUpperCase());
+        profile.setEmail(normalizedEmail);
+        profile.setUsername(StringUtils.valueOrFallback(request.getUsername(), fallbackUsername));
+        profile.setFirstName(StringUtils.valueOrFallback(request.getFirstName(), ""));
+        profile.setLastName(StringUtils.valueOrFallback(request.getLastName(), ""));
+        profile.setRole("STUDENT");
         profile.setPhoneNumber(request.getPhoneNumber());
 
         return profileRepository.upsert(profile);
@@ -47,21 +61,41 @@ public class ProfileService {
     }
 
     public UserProfile updateProfile(UserProfileRequest request) {
+        // Validate input
+        if (request.getId() == null) {
+            throw new IllegalArgumentException("User ID is required to update profile");
+        }
+        
         UserProfile profile = resolveProfileForUpdate(request);
 
         String normalizedEmail = StringUtils.valueOrFallback(request.getEmail(), profile.getEmail());
-        if (normalizedEmail == null || normalizedEmail.isBlank()) {
+        if (!ValidationUtils.isNotBlank(normalizedEmail)) {
             throw new IllegalArgumentException("Email is required to update profile");
+        }
+        
+        // Validate username if provided
+        if (request.getUsername() != null && !ValidationUtils.isValidUsername(request.getUsername())) {
+            throw new IllegalArgumentException("Username must be 3-50 characters and contain only letters, numbers, dots, hyphens, and underscores");
+        }
+        
+        // Validate phone if provided
+        if (request.getPhoneNumber() != null && !ValidationUtils.isBlank(request.getPhoneNumber()) && 
+            !ValidationUtils.isValidPhoneNumber(request.getPhoneNumber())) {
+            throw new IllegalArgumentException("Invalid phone number format");
         }
 
         profile.setEmail(normalizedEmail);
         profile.setUsername(mergeValue(request.getUsername(), profile.getUsername(), normalizedEmail));
-        profile.setFirstName(mergeValue(request.getFirstName(), profile.getFirstName(), "First"));
-        profile.setLastName(mergeValue(request.getLastName(), profile.getLastName(), "Last"));
+        profile.setFirstName(mergeValue(request.getFirstName(), profile.getFirstName(), ""));
+        profile.setLastName(mergeValue(request.getLastName(), profile.getLastName(), ""));
         profile.setRole(StringUtils.valueOrFallback(profile.getRole(), "STUDENT").toUpperCase());
         profile.setPhoneNumber(mergeOptionalPhone(request.getPhoneNumber(), profile.getPhoneNumber()));
+        // Note: profileImageUrl is only updated via updateProfilePicture()
 
-        return profileRepository.upsert(profile);
+        Long userId = requirePersistableId(profile, "profile update");
+        UserProfile persisted = profileRepository.updateById(userId, profile);
+        userRepository.syncUserMetadataByEmail(persisted.getEmail(), buildAuthMetadata(persisted));
+        return persisted;
     }
 
     public UserProfile ensureAdminProfile(String email, String username, String firstName, String lastName) {
@@ -78,51 +112,60 @@ public class ProfileService {
     }
 
     public UserProfile ensureStudentProfile(String email) {
-        UserProfile profile = profileRepository.findByEmail(email)
-                .orElseGet(UserProfile::new);
+        Optional<UserProfile> existing = profileRepository.findByEmail(email);
+        if (existing.isPresent()) {
+            // Profile already exists - return it without modification to preserve user data
+            return existing.get();
+        }
 
-        String normalizedEmail = StringUtils.valueOrFallback(email, "").toLowerCase();
-        String defaultUsername = normalizedEmail.contains("@")
+        // Profile does not exist - create a new one with minimal defaults
+        UserProfile profile = new UserProfile();
+        String normalizedEmail = StringUtils.normalizeEmail(email);
+        String defaultUsername = normalizedEmail != null && normalizedEmail.contains("@")
                 ? normalizedEmail.substring(0, normalizedEmail.indexOf('@'))
                 : normalizedEmail;
 
         profile.setEmail(normalizedEmail);
-        profile.setUsername(StringUtils.valueOrFallback(profile.getUsername(), StringUtils.valueOrFallback(defaultUsername, normalizedEmail)));
-        profile.setFirstName(StringUtils.valueOrFallback(profile.getFirstName(), "First"));
-        profile.setLastName(StringUtils.valueOrFallback(profile.getLastName(), "Last"));
-        profile.setRole(StringUtils.valueOrFallback(profile.getRole(), "STUDENT").toUpperCase());
+        profile.setUsername(StringUtils.valueOrFallback(defaultUsername, normalizedEmail));
+        profile.setFirstName("");
+        profile.setLastName("");
+        profile.setRole("STUDENT");
 
         return profileRepository.upsert(profile);
     }
 
-    public UserProfile updateProfilePicture(Long userId, String email, String fileName, String contentType, byte[] imageBytes) {
+    public UserProfile updateProfilePicture(Long userId, String fileName, String contentType, byte[] imageBytes) {
         if (imageBytes == null || imageBytes.length == 0) {
             throw new IllegalArgumentException("Profile image is required");
         }
 
-        UserProfile profile = resolveProfileForImageUpdate(userId, email);
-        profile.setProfileImage(imageBytes);
-        profile.setProfileImageName(fileName);
-        profile.setProfileImageContentType(contentType);
+        UserProfile profile = resolveProfileForImageUpdate(userId);
+        String extension = resolveImageExtension(fileName, contentType);
+        String identity = resolveStorageIdentity(profile);
+        String objectPath = "avatars/" + identity + "/profile-" + System.currentTimeMillis() + extension;
 
-        return profileRepository.upsert(profile);
+        profileRepository.uploadProfileImage(objectPath, imageBytes, contentType);
+
+        // Set only the public URL - this is the single source of truth for profile pictures
+        String publicUrl = profileRepository.buildPublicProfileImageUrl(objectPath);
+        profile.setProfileImageUrl(publicUrl);
+
+        Long profileUserId = requirePersistableId(profile, "profile picture update");
+        return profileRepository.updateById(profileUserId, profile);
     }
 
     private String mergeValue(String requestedValue, String existingValue, String fallback) {
-        if (requestedValue != null) {
-            String normalized = requestedValue.trim();
-            if (!normalized.isBlank()) {
-                return normalized;
-            }
+        // Prefer requested value if provided and not blank
+        if (requestedValue != null && !requestedValue.trim().isBlank()) {
+            return requestedValue.trim();
         }
-
-        if (existingValue != null) {
-            String normalizedExisting = existingValue.trim();
-            if (!normalizedExisting.isBlank()) {
-                return normalizedExisting;
-            }
+        
+        // Fall back to existing value if valid
+        if (existingValue != null && !existingValue.trim().isBlank()) {
+            return existingValue.trim();
         }
-
+        
+        // Use fallback as last resort
         return fallback;
     }
 
@@ -135,41 +178,72 @@ public class ProfileService {
     }
 
     private UserProfile resolveProfileForUpdate(UserProfileRequest request) {
-        if (request.getId() != null) {
-            Optional<UserProfile> byId = profileRepository.findById(request.getId());
-            if (byId.isPresent()) {
-                return byId.get();
-            }
+        if (request.getId() == null) {
+            throw new IllegalArgumentException("User ID is required to update profile");
         }
 
-        String requestEmail = request.getEmail();
-        if (requestEmail != null && !requestEmail.isBlank()) {
-            Optional<UserProfile> byEmail = profileRepository.findByEmail(requestEmail);
-            if (byEmail.isPresent()) {
-                return byEmail.get();
-            }
+        Optional<UserProfile> byId = profileRepository.findById(request.getId());
+        if (byId.isPresent()) {
+            return byId.get();
         }
 
-        UserProfile profile = new UserProfile();
-        if (request.getId() != null) {
-            profile.setId(request.getId());
-        }
-        return profile;
+        throw new IllegalArgumentException("Profile not found for user ID: " + request.getId());
     }
 
-    private UserProfile resolveProfileForImageUpdate(Long userId, String email) {
-        if (userId != null) {
-            Optional<UserProfile> byId = profileRepository.findById(userId);
-            if (byId.isPresent()) {
-                return byId.get();
-            }
+    private UserProfile resolveProfileForImageUpdate(Long userId) {
+        if (userId == null) {
+            throw new IllegalArgumentException("User ID is required to update profile image");
         }
 
-        if (email != null && !email.isBlank()) {
-            return profileRepository.findByEmail(email)
-                    .orElseGet(() -> ensureStudentProfile(email));
+        Optional<UserProfile> byId = profileRepository.findById(userId);
+        if (byId.isPresent()) {
+            return byId.get();
         }
 
-        throw new IllegalArgumentException("User ID or email is required to update profile image");
+        throw new IllegalArgumentException("Profile not found for user ID: " + userId);
+    }
+
+    private String resolveStorageIdentity(UserProfile profile) {
+        if (profile.getId() != null) {
+            return "id-" + profile.getId();
+        }
+        String normalizedEmail = StringUtils.normalizeEmail(profile.getEmail());
+        if (normalizedEmail == null || normalizedEmail.isBlank()) {
+            throw new IllegalArgumentException("Unable to resolve storage identity for profile image");
+        }
+        return normalizedEmail.replaceAll("[^a-z0-9@._-]", "_");
+    }
+
+    private Long requirePersistableId(UserProfile profile, String operation) {
+        if (profile.getId() == null) {
+            throw new IllegalArgumentException("User ID is required for " + operation);
+        }
+        return profile.getId();
+    }
+
+    private String resolveImageExtension(String fileName, String contentType) {
+        String lowerFile = fileName == null ? "" : fileName.trim().toLowerCase(Locale.ROOT);
+        if (lowerFile.endsWith(".png")) {
+            return ".png";
+        }
+        if (lowerFile.endsWith(".jpg") || lowerFile.endsWith(".jpeg")) {
+            return ".jpg";
+        }
+
+        String lowerType = contentType == null ? "" : contentType.trim().toLowerCase(Locale.ROOT);
+        if ("image/png".equals(lowerType)) {
+            return ".png";
+        }
+        return ".jpg";
+    }
+
+    private java.util.Map<String, Object> buildAuthMetadata(UserProfile profile) {
+        return java.util.Map.of(
+                "first_name", StringUtils.valueOrFallback(profile.getFirstName(), ""),
+                "last_name", StringUtils.valueOrFallback(profile.getLastName(), ""),
+                "username", StringUtils.valueOrFallback(profile.getUsername(), ""),
+                "phone_number", StringUtils.valueOrFallback(profile.getPhoneNumber(), ""),
+                "role", StringUtils.valueOrFallback(profile.getRole(), "STUDENT")
+        );
     }
 }

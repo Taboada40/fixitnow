@@ -2,7 +2,6 @@ package com.fixitnow.fixitnow_backend.model;
 
 public class ReportRequest {
     private Long userId;
-    private String email;
     private String title;
     private String description;
     private String location;
@@ -15,14 +14,6 @@ public class ReportRequest {
 
     public void setUserId(Long userId) {
         this.userId = userId;
-    }
-
-    public String getEmail() {
-        return email;
-    }
-
-    public void setEmail(String email) {
-        this.email = email;
     }
 
     public String getTitle() {

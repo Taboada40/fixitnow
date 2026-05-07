@@ -1,29 +1,12 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import axios from 'axios';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { API_BASE, STATUS_COLORS, getErrorMessage, normalizeStatus } from '../utils/constants';
-
-// Simple SVG icons inline (no extra dependencies)
-const HomeIcon = () => (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-        <polyline points="9 22 9 12 15 12 15 22" />
-    </svg>
-);
-
-const BellIcon = () => (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-        <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-    </svg>
-);
-
-const UserIcon = () => (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-        <circle cx="12" cy="7" r="4" />
-    </svg>
-);
+import { STATUS_COLORS, getErrorMessage, normalizeStatus } from '../utils/constants';
+import {
+    apiGet,
+    fetchProfileById,
+    mergeSessionProfile as persistProfileSession,
+    useSession
+} from '../utils/profileSession';
 
 const SearchIcon = () => (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -36,50 +19,32 @@ const buildSummaryFromReports = (items) => {
     const reports = Array.isArray(items) ? items : [];
     const totalReports = reports.length;
     const resolvedReports = reports.filter((report) => normalizeStatus(report?.status) === 'Fixed').length;
+    const alertsCount = reports.filter((report) => {
+        const status = normalizeStatus(report?.status);
+        return status === 'Pending' || status === 'In-Progress';
+    }).length;
 
     return {
         totalReports,
         resolvedReports,
-        alertsCount: Math.max(totalReports - resolvedReports, 0)
+        alertsCount
     };
 };
 
 const persistFreshProfile = (nextProfile) => {
-    try {
-        const raw = localStorage.getItem('session');
-        if (!raw) {
-            return;
-        }
-        const parsed = JSON.parse(raw);
-        const updated = {
-            ...parsed,
-            profile: {
-                ...(parsed?.profile || {}),
-                ...(nextProfile || {})
-            }
-        };
-        localStorage.setItem('session', JSON.stringify(updated));
-    } catch (_) {
-        // Keep dashboard usable even if session storage update fails.
-    }
+    persistProfileSession(nextProfile);
 };
 
 const Dashboard = () => {
     const navigate = useNavigate();
-    const storedSession = useMemo(() => JSON.parse(localStorage.getItem('session') || 'null'), []);
-    const authSession = storedSession?.session || storedSession;
-    const storedProfile = storedSession?.profile || {};
+    const session = useSession();
+    
+    const storedProfile = session?.profile || {};
     const [freshProfile, setFreshProfile] = useState(storedProfile);
-    const role = (freshProfile?.role || storedProfile?.role || 'STUDENT').toUpperCase();
-    const userMeta = authSession?.user?.user_metadata || {};
-    const displayName = freshProfile?.firstName
-        ? `${freshProfile.firstName} ${freshProfile.lastName || ''}`.trim()
-        : (userMeta.first_name
-            ? `${userMeta.first_name} ${userMeta.last_name || ''}`.trim()
-            : (freshProfile?.username || storedProfile?.username || userMeta.username || authSession?.user?.email || 'Student'));
+    const role = useMemo(() => (freshProfile?.role || storedProfile?.role || 'STUDENT').toUpperCase(), [freshProfile?.role, storedProfile?.role]);
 
     const [filter, setFilter] = useState('All');
-    const [search, setSearch]   = useState('');
+    const [search, setSearch] = useState('');
     const [reports, setReports] = useState([]);
     const [summary, setSummary] = useState({
         totalReports: 0,
@@ -88,66 +53,71 @@ const Dashboard = () => {
     });
     const [reportsError, setReportsError] = useState('');
     const [loadingReports, setLoadingReports] = useState(true);
-    const [refreshing, setRefreshing] = useState(false);
-    const [lastSyncedAt, setLastSyncedAt] = useState(null);
-    const refreshTimerRef = useRef(null);
-    const activeUserId = freshProfile?.id || storedProfile?.id || null;
+    const [isInitialLoad, setIsInitialLoad] = useState(true);
+    const isFetchingRef = useRef(false);
+    const hasLoadedOnceRef = useRef(false);
+    
+    const activeUserId = useMemo(() => freshProfile?.id || storedProfile?.id || null, [freshProfile?.id, storedProfile?.id]);
 
-    const loadDashboardData = useCallback(async (isInitial = false) => {
+    const loadDashboardData = useCallback(async ({ showLoader = false } = {}) => {
         if (!activeUserId) {
             setReportsError('Unable to load dashboard. Please login again.');
             setLoadingReports(false);
             return;
         }
 
-        if (isInitial) {
+        if (isFetchingRef.current) {
+            return;
+        }
+
+        isFetchingRef.current = true;
+        if (showLoader) {
             setLoadingReports(true);
-        } else {
-            setRefreshing(true);
         }
 
         try {
-            const profileRes = await axios.get(
-                `${API_BASE}/api/profile/by-id?userId=${encodeURIComponent(activeUserId)}&_ts=${Date.now()}`,
-                { withCredentials: true }
-            );
-            const latestProfile = profileRes?.data || {};
-            const latestUserId = latestProfile?.id;
+            const [profileRes, reportsRes, summaryRes] = await Promise.allSettled([
+                fetchProfileById(activeUserId),
+                apiGet('/api/reports', {
+                    params: { userId: activeUserId, _ts: Date.now() }
+                }),
+                apiGet('/api/reports/summary', {
+                    params: { userId: activeUserId, _ts: Date.now() }
+                })
+            ]);
 
-            if (!latestUserId) {
-                throw new Error('Authenticated profile ID is missing.');
+            if (profileRes.status === 'fulfilled') {
+                const latestProfile = profileRes.value;
+                if (latestProfile?.id) {
+                    setFreshProfile(latestProfile);
+                    persistFreshProfile(latestProfile);
+                } else {
+                    throw new Error('Authenticated profile ID is missing.');
+                }
+            } else {
+                throw new Error('Failed to load profile data.');
             }
 
-            setFreshProfile(latestProfile);
-            persistFreshProfile(latestProfile);
+            if (reportsRes.status === 'fulfilled') {
+                const reportItems = Array.isArray(reportsRes.value.data) ? reportsRes.value.data : [];
+                const scopedReports = activeUserId
+                    ? reportItems.filter((item) => Number(item?.userId) === Number(activeUserId))
+                    : reportItems;
+                setReports(scopedReports);
 
-            const reportsRes = await axios.get(
-                `${API_BASE}/api/reports?userId=${encodeURIComponent(latestUserId)}&_ts=${Date.now()}`,
-                { withCredentials: true }
-            );
-
-            const reportItems = Array.isArray(reportsRes.data) ? reportsRes.data : [];
-            const scopedReports = latestUserId
-                ? reportItems.filter((item) => Number(item?.userId) === Number(latestUserId))
-                : reportItems;
-            setReports(scopedReports);
-
-            try {
-                const summaryRes = await axios.get(
-                    `${API_BASE}/api/reports/summary?userId=${encodeURIComponent(latestUserId)}&_ts=${Date.now()}`,
-                    { withCredentials: true }
-                );
-
-                setSummary({
-                    totalReports: Number(summaryRes?.data?.totalReports || 0),
-                    resolvedReports: Number(summaryRes?.data?.resolvedReports || 0),
-                    alertsCount: Number(summaryRes?.data?.alertsCount || 0)
-                });
-            } catch (_) {
-                setSummary(buildSummaryFromReports(scopedReports));
+                if (summaryRes.status === 'fulfilled') {
+                    setSummary({
+                        totalReports: Number(summaryRes.value.data?.totalReports || 0),
+                        resolvedReports: Number(summaryRes.value.data?.resolvedReports || 0),
+                        alertsCount: Number(summaryRes.value.data?.alertsCount || 0)
+                    });
+                } else {
+                    setSummary(buildSummaryFromReports(scopedReports));
+                }
+            } else {
+                throw new Error('Failed to load reports data.');
             }
 
-            setLastSyncedAt(new Date());
             setReportsError('');
         } catch (err) {
             const message = !err?.response
@@ -155,23 +125,23 @@ const Dashboard = () => {
                 : getErrorMessage(err, 'Failed to load dashboard data.');
             setReportsError(message);
         } finally {
-            if (isInitial) {
-                setLoadingReports(false);
+            setLoadingReports(false);
+            isFetchingRef.current = false;
+            if (showLoader) {
+                setIsInitialLoad(false);
+                hasLoadedOnceRef.current = true;
             }
-            setRefreshing(false);
         }
     }, [activeUserId]);
 
     useEffect(() => {
-        return () => {
-            if (refreshTimerRef.current) {
-                clearInterval(refreshTimerRef.current);
-            }
-        };
-    }, []);
+        hasLoadedOnceRef.current = false;
+        setIsInitialLoad(true);
+        setLoadingReports(true);
+    }, [activeUserId]);
 
     useEffect(() => {
-        if (!storedSession) {
+        if (!session) {
             navigate('/login');
             return;
         }
@@ -180,114 +150,57 @@ const Dashboard = () => {
             return;
         }
 
-        loadDashboardData(true);
+        loadDashboardData({ showLoader: !hasLoadedOnceRef.current });
 
-        const onFocus = () => loadDashboardData(false);
+        let refreshTimeout;
+        const handleRefresh = () => {
+            clearTimeout(refreshTimeout);
+            refreshTimeout = setTimeout(() => {
+                loadDashboardData({ showLoader: false });
+            }, 1000);
+        };
+
+        const onFocus = handleRefresh;
         const onVisible = () => {
             if (document.visibilityState === 'visible') {
-                loadDashboardData(false);
+                handleRefresh();
             }
         };
-        const onProfileUpdated = (event) => {
-            const updatedProfile = event.detail;
-            setFreshProfile(prevProfile => ({
-                ...prevProfile,
-                ...updatedProfile
-            }));
-            persistFreshProfile(updatedProfile);
-        };
-
+        
         window.addEventListener('focus', onFocus);
         document.addEventListener('visibilitychange', onVisible);
-        window.addEventListener('profileUpdated', onProfileUpdated);
-
-        if (refreshTimerRef.current) {
-            clearInterval(refreshTimerRef.current);
-        }
-        refreshTimerRef.current = setInterval(() => {
-            loadDashboardData(false);
-        }, 8000);
 
         return () => {
             window.removeEventListener('focus', onFocus);
             document.removeEventListener('visibilitychange', onVisible);
-            window.removeEventListener('profileUpdated', onProfileUpdated);
-            if (refreshTimerRef.current) {
-                clearInterval(refreshTimerRef.current);
-                refreshTimerRef.current = null;
-            }
+            clearTimeout(refreshTimeout);
         };
-    }, [storedSession, navigate, role, loadDashboardData]);
+    }, [session, navigate, role, loadDashboardData]);
 
-    const filtered = reports.filter(issue => {
-        const status = normalizeStatus(issue.status);
-        const text = (issue.description || issue.title || '').toLowerCase();
-        const matchStatus = filter === 'All' || status === filter;
-        const matchSearch = text.includes(search.toLowerCase());
-        return matchStatus && matchSearch;
-    });
+    const handleSearchChange = (value) => {
+        setSearch(value);
+    };
+
+    const filtered = useMemo(() => {
+        return reports.filter(issue => {
+            const status = normalizeStatus(issue.status);
+            const text = (issue.description || issue.title || '').toLowerCase();
+            const matchStatus = filter === 'All' || status === filter;
+            const matchSearch = text.includes(search.toLowerCase());
+            return matchStatus && matchSearch;
+        });
+    }, [reports, filter, search]);
 
     const activeCount   = summary.totalReports;
     const resolvedCount = summary.resolvedReports;
     const alertCount    = summary.alertsCount;
 
-    const handleLogout = () => {
-        localStorage.removeItem('session');
-        navigate('/login');
-    };
-
     return (
         <div className="db-wrapper">
-            {/* ── Top Navbar ── */}
-            <nav className="db-navbar">
-                <span className="db-nav-label">Dashboard Page</span>
-                <div className="db-nav-icons">
-                    <button className="db-icon-btn" onClick={() => navigate('/dashboard')} title="Home">
-                        <HomeIcon />
-                    </button>
-                    <button className="db-icon-btn" onClick={() => navigate('/notifications')} title="Notifications">
-                        <BellIcon />
-                    </button>
-                    <button className="db-icon-btn" onClick={() => navigate('/profile')} title={`Open profile for ${displayName}`}>
-                        <UserIcon />
-                    </button>
-                    <button className="db-logout-btn" onClick={handleLogout}>
-                        Logout
-                    </button>
-                </div>
-            </nav>
-
-            {/* ── Main Content ── */}
             <main className="db-main">
-                <h1 className="db-title">User Dashboard</h1>
-                <div
-                    className="db-sync-row"
-                    style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        marginBottom: '14px',
-                        padding: '10px 12px',
-                        borderRadius: '10px',
-                        background: 'rgba(255,255,255,0.06)',
-                        border: '1px solid rgba(255,255,255,0.12)'
-                    }}
-                >
-                    <span className="db-sync-label" style={{ fontSize: '13px', opacity: 0.9 }}>
-                        {lastSyncedAt ? `Last synced: ${lastSyncedAt.toLocaleTimeString()}` : 'Sync pending...'}
-                    </span>
-                    <button
-                        className="profile-nav-btn"
-                        style={{ minWidth: '110px' }}
-                        onClick={() => loadDashboardData(false)}
-                        disabled={loadingReports || refreshing || !activeUserId}
-                    >
-                        {refreshing ? 'Refreshing...' : 'Refresh'}
-                    </button>
-                </div>
+                <h1 className="db-title ui-page-title">User Dashboard</h1>
                 {reportsError && <div className="error-msg">{reportsError}</div>}
 
-                {/* ── Stat Cards ── */}
                 <div className="db-stats">
                     <div className="db-stat-card">
                         <span className="db-stat-label">Active Reports</span>
@@ -303,65 +216,82 @@ const Dashboard = () => {
                     </div>
                 </div>
 
-                {/* ── Reported Issues ── */}
-                <h2 className="db-section-title">Reported Issue</h2>
+                <h2 className="db-section-title ui-section-title">Reported Issue</h2>
 
                 <div className="db-controls">
                     <div className="db-filter-wrap">
                         <select
-                            className="db-filter"
+                            className="db-filter ui-select"
                             value={filter}
                             onChange={e => setFilter(e.target.value)}
                         >
                             <option>All</option>
-                            <option>In-Progress</option>
                             <option>Pending</option>
+                            <option>In-Progress</option>
                             <option>Fixed</option>
                             <option>Cancelled</option>
                         </select>
                     </div>
                     <div className="db-search-wrap">
                         <input
-                            className="db-search"
+                            className="db-search ui-input"
                             type="text"
                             placeholder="Search your reported issue"
                             value={search}
-                            onChange={e => setSearch(e.target.value)}
+                            onChange={e => handleSearchChange(e.target.value)}
                         />
                         <span className="db-search-icon"><SearchIcon /></span>
                     </div>
                 </div>
 
                 <div className="db-issues-box">
-                    {loadingReports ? (
+                    {loadingReports && isInitialLoad ? (
                         <p className="db-no-issues">Loading reports...</p>
                     ) : filtered.length === 0 ? (
                         <p className="db-no-issues">No issues match your filter.</p>
                     ) : (
-                        filtered.map(issue => (
-                            <div key={issue.id} className="db-issue-row">
-                                <span
-                                    className="db-issue-status"
-                                    style={{ color: STATUS_COLORS[normalizeStatus(issue.status)] || '#fff' }}
-                                >
-                                    {normalizeStatus(issue.status)}
-                                </span>
-                                <div className="db-issue-bar">
-                                    <span className="db-issue-title">{issue.description || issue.title}</span>
+                        filtered.map(issue => {
+                            const status = normalizeStatus(issue.status);
+                            const color = STATUS_COLORS[status] || STATUS_COLORS.default;
+                            const statusDisplay = status.replace('-', ' ');
+
+                            return (
+                                <div key={issue.id} className="db-issue-card">
+                                    <div className="db-issue-header">
+                                        <div className="db-issue-id-group">
+                                            <span className="db-issue-id">#{issue.id}</span>
+                                            <span className="db-issue-status" style={{ backgroundColor: color }}>
+                                                {statusDisplay}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="db-issue-body">
+                                        <h3 className="db-issue-title">{issue.title || 'Untitled Issue'}</h3>
+                                        <p className="db-issue-desc">{issue.description || 'No description provided.'}</p>
+                                        <div className="db-issue-meta">
+                                            <span className="db-issue-location">📍 {issue.location || 'Unknown location'}</span>
+                                            <span className="db-issue-date">
+                                                {issue.createdAt ? new Date(issue.createdAt).toLocaleDateString() : 'No date'}
+                                            </span>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                        ))
+                            );
+                        })
                     )}
                 </div>
 
                 <div className="db-footer">
-                    <button className="db-report-btn" onClick={() => navigate('/report-issue')}
+                    <button 
+                        className="db-report-btn ui-button ui-button--primary"
+                        onClick={() => navigate('/report-issue')}
                     >
-                        Report an Issue
+                        + Report Issue
                     </button>
                 </div>
             </main>
         </div>
     );
 };
+
 export default Dashboard;

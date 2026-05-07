@@ -2,11 +2,11 @@ package com.fixitnow.fixitnow_backend.controller;
 
 import com.fixitnow.fixitnow_backend.model.ReportItem;
 import com.fixitnow.fixitnow_backend.model.ReportRequest;
+import com.fixitnow.fixitnow_backend.model.ReportStatus;
 import com.fixitnow.fixitnow_backend.model.UserDashboardSummary;
 import com.fixitnow.fixitnow_backend.service.ReportService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,7 +22,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/reports")
-@CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true")
 public class ReportController {
 
     private final ReportService reportService;
@@ -57,6 +56,9 @@ public class ReportController {
 
     @PostMapping
     public ResponseEntity<?> createReport(@RequestBody ReportRequest request) {
+        if (request == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Report payload is required"));
+        }
         if (request.getUserId() == null) {
             return ResponseEntity.badRequest().body(Map.of("message", "User ID is required"));
         }
@@ -96,14 +98,23 @@ public class ReportController {
                 .orElse(null);
 
         UserDashboardSummary summary = new UserDashboardSummary();
-    summary.setEmail(reports.stream()
-        .map(ReportItem::getEmail)
-        .filter(value -> value != null && !value.isBlank())
-        .findFirst()
-        .orElse(""));
+        summary.setUserId(reports.stream()
+                .map(ReportItem::getUserId)
+                .filter(value -> value != null)
+                .findFirst()
+                .orElse(null));
+        summary.setEmail(reports.stream()
+                .map(ReportItem::getEmail)
+                .filter(value -> value != null && !value.isBlank())
+                .findFirst()
+                .orElse(""));
         summary.setTotalReports(totalReports);
         summary.setResolvedReports(resolvedReports);
-        summary.setAlertsCount(Math.max(totalReports - resolvedReports, 0));
+        summary.setAlertsCount(reports.stream()
+                .filter(report -> {
+                    return ReportStatus.isActive(report.getStatus());
+                })
+                .count());
         summary.setLastReportAt(lastReportAt);
         return summary;
     }

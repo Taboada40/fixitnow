@@ -18,11 +18,7 @@ public class UserProfile {
 
     private String phoneNumber;
 
-    private byte[] profileImage;
-
-    private String profileImageName;
-
-    private String profileImageContentType;
+    private String profileImageUrl;
 
     private LocalDateTime createdAt;
 
@@ -84,28 +80,12 @@ public class UserProfile {
         this.phoneNumber = phoneNumber;
     }
 
-    public byte[] getProfileImage() {
-        return profileImage;
+    public String getProfileImageUrl() {
+        return profileImageUrl;
     }
 
-    public void setProfileImage(byte[] profileImage) {
-        this.profileImage = profileImage;
-    }
-
-    public String getProfileImageName() {
-        return profileImageName;
-    }
-
-    public void setProfileImageName(String profileImageName) {
-        this.profileImageName = profileImageName;
-    }
-
-    public String getProfileImageContentType() {
-        return profileImageContentType;
-    }
-
-    public void setProfileImageContentType(String profileImageContentType) {
-        this.profileImageContentType = profileImageContentType;
+    public void setProfileImageUrl(String profileImageUrl) {
+        this.profileImageUrl = profileImageUrl;
     }
 
     public LocalDateTime getCreatedAt() {

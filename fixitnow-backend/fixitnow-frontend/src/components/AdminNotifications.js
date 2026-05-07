@@ -1,20 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { API_BASE, DEFAULT_ADMIN_EMAIL } from '../utils/constants';
+import { getErrorMessage } from '../utils/constants';
+import { apiGet, useSession } from '../utils/profileSession';
 
 const AdminNotifications = () => {
     const navigate = useNavigate();
-    const storedSession = useMemo(() => JSON.parse(localStorage.getItem('session') || 'null'), []);
-    const role = (storedSession?.profile?.role || 'STUDENT').toUpperCase();
-    const adminEmail = storedSession?.profile?.email || storedSession?.session?.user?.email || DEFAULT_ADMIN_EMAIL;
+    const session = useSession();
+    const profile = session?.profile || {};
+    const role = (profile?.role || 'STUDENT').toUpperCase();
+    const adminUserId = profile?.id || null;
+    const adminEmail = profile?.email || session?.session?.user?.email || '';
+    const adminAccessParams = useMemo(
+        () => (adminUserId ? { adminUserId } : { adminEmail }),
+        [adminUserId, adminEmail]
+    );
 
     const [notifications, setNotifications] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
     useEffect(() => {
-        if (!storedSession) {
+        if (!session) {
             navigate('/login');
             return;
         }
@@ -25,12 +31,10 @@ const AdminNotifications = () => {
 
         const loadNotifications = async () => {
             try {
-                const res = await axios.get(`${API_BASE}/api/admin/notifications?adminEmail=${encodeURIComponent(adminEmail || '')}`, {
-                    withCredentials: true
-                });
+                const res = await apiGet('/api/admin/notifications', { params: adminAccessParams });
                 setNotifications(Array.isArray(res.data) ? res.data : []);
             } catch (err) {
-                const message = err.response?.data?.message || 'Failed to load admin notifications.';
+                const message = getErrorMessage(err, 'Failed to load admin notifications.');
                 setError(message);
             } finally {
                 setLoading(false);
@@ -38,24 +42,15 @@ const AdminNotifications = () => {
         };
 
         loadNotifications();
-    }, [storedSession, role, adminEmail, navigate]);
-
-    const handleLogout = () => {
-        localStorage.removeItem('session');
-        navigate('/login');
-    };
+    }, [session, role, adminAccessParams, navigate]);
 
     return (
         <div className="profile-page">
             <div className="profile-card">
                 <div className="profile-top">
                     <div>
-                        <h2>Admin Notifications</h2>
+                        <h2 className="ui-page-title">Admin Notifications</h2>
                         <p>New reports submitted by users</p>
-                    </div>
-                    <div className="profile-top-actions">
-                        <button className="profile-nav-btn" onClick={() => navigate('/admin/dashboard')}>Admin Dashboard</button>
-                        <button className="profile-nav-btn danger" onClick={handleLogout}>Logout</button>
                     </div>
                 </div>
 

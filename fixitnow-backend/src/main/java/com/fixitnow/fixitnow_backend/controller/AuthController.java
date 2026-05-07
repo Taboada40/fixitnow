@@ -1,14 +1,11 @@
 package com.fixitnow.fixitnow_backend.controller;
 
-import java.util.Locale;
+import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -25,14 +22,12 @@ import com.fixitnow.fixitnow_backend.util.StringUtils;
 
 @RestController
 @RequestMapping("/api/auth")
-// No need for @CrossOrigin here if SecurityConfig is set up correctly, but keeping it for safety
-@CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true")
 public class AuthController {
 
     private final UserRepository userRepository;
     private final ProfileService profileService;
 
-    @Value("${app.admin.email:admin@cit.edu}")
+    @Value("${app.admin.email:}")
     private String configuredAdminEmail;
 
     public AuthController(UserRepository userRepository, ProfileService profileService) {
@@ -42,10 +37,17 @@ public class AuthController {
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody UserRequest request) {
+        if (request == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Registration payload is required"));
+        }
+
         try {
             request.setEmail(StringUtils.normalizeEmail(request.getEmail()));
             if (request.getEmail() == null || request.getEmail().isBlank()) {
                 return ResponseEntity.badRequest().body(Map.of("message", "Email or login ID is required"));
+            }
+            if (request.getPassword() == null || request.getPassword().isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("message", "Password is required"));
             }
             ResponseEntity<Map<String, Object>> signUpResponse = userRepository.signUp(request);
             if (signUpResponse.getStatusCode().is2xxSuccessful()) {
@@ -70,15 +72,29 @@ public class AuthController {
             return ResponseEntity.badRequest().body(Map.of("message", "Login payload is required"));
         }
 
-        String rawIdentifier = request.getEmail();
         try {
-            request.setEmail(resolveLoginIdentifier(request.getEmail()));
+            request.setEmail(StringUtils.normalizeEmail(request.getEmail()));
             if (request.getEmail() == null || request.getEmail().isBlank()) {
                 return ResponseEntity.badRequest().body(Map.of("message", "Email or login ID is required"));
             }
+            if (request.getPassword() == null || request.getPassword().isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("message", "Password is required"));
+            }
             ResponseEntity<Map<String, Object>> signInResponse = userRepository.signIn(request);
+            Map<String, Object> sessionBody = signInResponse.getBody();
+            if (sessionBody == null) {
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                        .body(Map.of("message", "Login succeeded but Supabase returned an empty session"));
+            }
+
+            String accessToken = valueAsText(sessionBody.get("access_token"));
+            if (accessToken == null || accessToken.isBlank()) {
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                        .body(Map.of("message", "Login succeeded but no access token was returned"));
+            }
+
             UserProfile profile = profileService.getByEmail(request.getEmail())
-                .orElseGet(() -> profileService.upsertFromRegistration(request));
+                .orElseGet(() -> profileService.ensureStudentProfile(request.getEmail()));
 
             if (StringUtils.normalizeEmail(request.getEmail()).equals(StringUtils.normalizeEmail(configuredAdminEmail))) {
                 profile = profileService.ensureAdminProfile(
@@ -89,37 +105,8 @@ public class AuthController {
                 );
             }
 
-            return ResponseEntity.ok(Map.of(
-                "message", "Login successful",
-                "session", signInResponse.getBody(),
-                "profile", profile
-            ));
+            return ResponseEntity.ok(buildLoginResponse(sessionBody, profile));
         } catch (HttpClientErrorException e) {
-            if (isDefaultAdminLogin(request)) {
-                UserProfile adminProfile = profileService.ensureAdminProfile(
-                        "admin@cit.edu",
-                        "admin",
-                        "Admin",
-                        "User"
-                );
-
-                Map<String, Object> fallbackSession = Map.of(
-                        "access_token", "local-admin-" + UUID.randomUUID(),
-                        "token_type", "bearer"
-                );
-
-                return ResponseEntity.ok(Map.of(
-                    "message", "Login successful",
-                        "session", fallbackSession,
-                        "profile", adminProfile
-                ));
-            }
-
-            ResponseEntity<?> fallback = tryLegacyProjectLocalLogin(request, rawIdentifier);
-            if (fallback != null) {
-                return fallback;
-            }
-
             // Pass through Supabase's real error body (e.g. "Email not confirmed", "Invalid login credentials")
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
@@ -128,115 +115,15 @@ public class AuthController {
         }
     }
 
-    private boolean isDefaultAdminLogin(UserRequest request) {
-        if (request == null) {
-            return false;
-        }
-        String email = request.getEmail() == null ? "" : request.getEmail().trim().toLowerCase();
-        String password = request.getPassword() == null ? "" : request.getPassword().trim();
-        return "admin@cit.edu".equals(email) && "admin12345".equals(password);
-    }
-
-    private String resolveLoginIdentifier(String value) {
-        if (value == null) {
-            return null;
-        }
-
-        String raw = value.trim();
-        if (raw.isBlank()) {
-            return "";
-        }
-
-        String normalizedCandidate = StringUtils.normalizeEmail(raw);
-
-        // 1) If this exact email exists in profile records, use it directly.
-        Optional<UserProfile> byEmail = profileService.getByEmail(normalizedCandidate);
-        if (byEmail.isPresent()) {
-            return normalizedCandidate;
-        }
-
-        // 2) Try matching by username/login ID.
-        String loginId = raw.contains("@") ? raw.substring(0, raw.indexOf('@')) : raw;
-        String normalizedLoginId = loginId.toLowerCase(Locale.ROOT).trim();
-
-        if (!normalizedLoginId.isBlank()) {
-            try {
-                Optional<UserProfile> byUsername = profileService.listAllProfiles()
-                        .stream()
-                        .filter(p -> p.getUsername() != null && p.getUsername().trim().equalsIgnoreCase(normalizedLoginId))
-                        .findFirst();
-
-                if (byUsername.isPresent()
-                        && byUsername.get().getEmail() != null
-                        && !byUsername.get().getEmail().isBlank()) {
-                    return StringUtils.normalizeEmail(byUsername.get().getEmail());
-                }
-
-                Optional<UserProfile> byEmailLocalPart = profileService.listAllProfiles()
-                        .stream()
-                        .filter(p -> {
-                            if (p.getEmail() == null || p.getEmail().isBlank()) {
-                                return false;
-                            }
-                            String profileEmail = p.getEmail().trim().toLowerCase(Locale.ROOT);
-                            int at = profileEmail.indexOf('@');
-                            if (at <= 0) {
-                                return false;
-                            }
-                            String localPart = profileEmail.substring(0, at);
-                            return localPart.equalsIgnoreCase(normalizedLoginId);
-                        })
-                        .findFirst();
-
-                if (byEmailLocalPart.isPresent()) {
-                    return StringUtils.normalizeEmail(byEmailLocalPart.get().getEmail());
-                }
-            } catch (Exception e) {
-                // Fall back to normalized input when profile lookup is unavailable.
-            }
-        }
-
-        // 3) Last resort: use normalized candidate.
-        return normalizedCandidate;
-    }
-
-    private ResponseEntity<?> tryLegacyProjectLocalLogin(UserRequest request, String rawIdentifier) {
-        if (request == null || request.getPassword() == null || request.getPassword().isBlank()) {
-            return null;
-        }
-
-        String candidate = rawIdentifier == null ? "" : rawIdentifier.trim().toLowerCase(Locale.ROOT);
-        if (candidate.isBlank()) {
-            return null;
-        }
-
-        String localPart = candidate.contains("@") ? candidate.substring(0, candidate.indexOf('@')) : candidate;
-        if (localPart.isBlank()) {
-            return null;
-        }
-
-        String fallbackEmail = localPart + "@project.local";
-        if (fallbackEmail.equalsIgnoreCase(request.getEmail())) {
-            return null;
-        }
-
-        try {
-            UserRequest fallbackRequest = new UserRequest();
-            fallbackRequest.setEmail(fallbackEmail);
-            fallbackRequest.setPassword(request.getPassword());
-
-            ResponseEntity<Map<String, Object>> signInResponse = userRepository.signIn(fallbackRequest);
-            UserProfile profile = profileService.getByEmail(fallbackEmail)
-                    .orElseGet(() -> profileService.ensureStudentProfile(fallbackEmail));
-
-            return ResponseEntity.ok(Map.of(
-                    "message", "Login successful",
-                    "session", signInResponse.getBody(),
-                    "profile", profile
-            ));
-        } catch (Exception ignored) {
-            return null;
-        }
+    private Map<String, Object> buildLoginResponse(Map<String, Object> sessionBody, UserProfile profile) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("message", "Login successful");
+        response.put("accessToken", valueAsText(sessionBody.get("access_token")));
+        response.put("tokenType", valueAsText(sessionBody.get("token_type")));
+        response.put("refreshToken", valueAsText(sessionBody.get("refresh_token")));
+        response.put("session", sessionBody);
+        response.put("profile", profile);
+        return response;
     }
 
     @PutMapping("/password")
@@ -245,7 +132,7 @@ public class AuthController {
             return ResponseEntity.badRequest().body(Map.of("message", "Password payload is required"));
         }
 
-        String identifier = resolveLoginIdentifier(request.getEmail());
+        String identifier = StringUtils.normalizeEmail(request.getEmail());
         if (identifier == null || identifier.isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("message", "Email or login ID is required"));
         }

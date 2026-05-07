@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
@@ -8,11 +8,19 @@ import ReportHistory from './components/ReportHistory';
 import ReportIssue from './components/ReportIssue';
 import UserNotifications from './components/UserNotifications';
 import AdminNotifications from './components/AdminNotifications';
+import TopNavBar from './components/TopNavBar';
+import { useSession } from './utils/profileSession';
 import './App.css';
 
-function App() {
+function AppContent() {
+  const location = useLocation();
+  const session = useSession();
+  const hideNavOnPaths = ['/login', '/register'];
+  const showNav = !!session && !hideNavOnPaths.includes(location.pathname);
+
   return (
-    <Router>
+    <>
+      {showNav && <TopNavBar />}
       <Routes>
         <Route path="/" element={<Dashboard />} />
         <Route path="/login" element={<Login />} />
@@ -26,6 +34,14 @@ function App() {
         <Route path="/reports" element={<ReportHistory />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
+    </>
+  );
+}
+
+function App() {
+  return (
+    <Router>
+      <AppContent />
     </Router>
   );
 }

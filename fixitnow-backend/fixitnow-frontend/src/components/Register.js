@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
-import { API_BASE, normalizeEmail } from '../utils/constants';
+import { normalizeEmail } from '../utils/constants';
+import { apiPost } from '../utils/profileSession';
 
 const Register = () => {
     const [formData, setFormData] = useState({
@@ -37,14 +37,14 @@ const Register = () => {
 
         setLoading(true);
         try {
-            await axios.post(`${API_BASE}/api/auth/register`, {
+            await apiPost('/api/auth/register', {
                 firstName: formData.firstName,
                 lastName: formData.lastName,
                 username: formData.username,
                 phoneNumber: formData.phoneNumber,
                 email: normalizedEmail,
                 password: formData.password
-            }, { withCredentials: true });
+            }, { auth: false });
             alert('Account created successfully. You can now log in.');
             navigate('/login');
         } catch (err) {
@@ -70,48 +70,75 @@ const Register = () => {
                         <div className="form-row">
                             <div className="form-group">
                                 <label>First Name</label>
-                                <input type="text" required placeholder=""
+                                <input
+                                    className="ui-input"
+                                    type="text"
+                                    required
+                                    placeholder=""
                                     value={formData.firstName}
                                     onChange={e => setFormData({...formData, firstName: e.target.value})} />
                             </div>
                             <div className="form-group">
                                 <label>Last Name</label>
-                                <input type="text" required placeholder=""
+                                <input
+                                    className="ui-input"
+                                    type="text"
+                                    required
+                                    placeholder=""
                                     value={formData.lastName}
                                     onChange={e => setFormData({...formData, lastName: e.target.value})} />
                             </div>
                         </div>
                         <div className="form-group">
                             <label>Username</label>
-                            <input type="text" required placeholder=""
+                            <input
+                                className="ui-input"
+                                type="text"
+                                required
+                                placeholder=""
                                 value={formData.username}
                                 onChange={e => setFormData({...formData, username: e.target.value})} />
                         </div>
                         <div className="form-group">
                             <label>Phone Number</label>
-                            <input type="text" placeholder=""
+                            <input
+                                className="ui-input"
+                                type="text"
+                                placeholder=""
                                 value={formData.phoneNumber}
                                 onChange={e => setFormData({...formData, phoneNumber: e.target.value})} />
                         </div>
                         <div className="form-group">
                             <label>Email Address</label>
-                            <input type="text" required placeholder=""
+                            <input
+                                className="ui-input"
+                                type="text"
+                                required
+                                placeholder=""
                                 value={formData.email}
                                 onChange={e => setFormData({...formData, email: e.target.value})} />
                         </div>
                         <div className="form-group">
                             <label>Password</label>
-                            <input type="password" required placeholder=""
+                            <input
+                                className="ui-input"
+                                type="password"
+                                required
+                                placeholder=""
                                 value={formData.password}
                                 onChange={e => setFormData({...formData, password: e.target.value})} />
                         </div>
                         <div className="form-group">
                             <label>Confirm password</label>
-                            <input type="password" required placeholder=""
+                            <input
+                                className="ui-input"
+                                type="password"
+                                required
+                                placeholder=""
                                 value={formData.confirmPassword}
                                 onChange={e => setFormData({...formData, confirmPassword: e.target.value})} />
                         </div>
-                        <button className="btn-builder" disabled={loading}>
+                        <button className="ui-button ui-button--primary ui-button--block" disabled={loading}>
                             {loading ? 'Creating account...' : 'Sign up'}
                         </button>
                     </form>

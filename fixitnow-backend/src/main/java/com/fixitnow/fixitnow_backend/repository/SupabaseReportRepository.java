@@ -1,7 +1,9 @@
 package com.fixitnow.fixitnow_backend.repository;
 
 import com.fixitnow.fixitnow_backend.model.ReportItem;
+import com.fixitnow.fixitnow_backend.model.ReportStatus;
 import com.fixitnow.fixitnow_backend.model.UserDashboardSummary;
+import com.fixitnow.fixitnow_backend.util.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
@@ -15,12 +17,16 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
 import java.net.http.HttpClient;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import static com.fixitnow.fixitnow_backend.util.SupabaseRowUtils.toDateTime;
+import static com.fixitnow.fixitnow_backend.util.SupabaseRowUtils.toLong;
+import static com.fixitnow.fixitnow_backend.util.SupabaseRowUtils.toLongOrZero;
+import static com.fixitnow.fixitnow_backend.util.SupabaseRowUtils.toText;
 
 @Repository
 public class SupabaseReportRepository {
@@ -31,9 +37,12 @@ public class SupabaseReportRepository {
     @Value("${supabase.key}")
     private String supabaseKey;
 
-        private final RestTemplate restTemplate = new RestTemplate(
+    @Value("${supabase.service-key:}")
+    private String supabaseServiceKey;
+
+    private final RestTemplate restTemplate = new RestTemplate(
             new JdkClientHttpRequestFactory(HttpClient.newHttpClient())
-        );
+    );
 
     public List<ReportItem> listByUserId(Long userId) {
         if (userId == null) {
@@ -94,7 +103,7 @@ public class SupabaseReportRepository {
 
         Map<String, Object> body = new HashMap<>();
         body.put("user_id", item.getUserId());
-        body.put("email", normalizeEmail(item.getEmail()));
+        body.put("email", StringUtils.normalizeEmail(item.getEmail()));
         body.put("title", item.getTitle());
         body.put("description", item.getDescription());
         body.put("location", item.getLocation());
@@ -123,20 +132,29 @@ public class SupabaseReportRepository {
     }
 
     public boolean deleteByIdAndUserId(Long id, Long userId) {
-        if (userId == null) {
+        if (id == null || userId == null) {
             return false;
         }
 
         String url = supabaseUrl + "/rest/v1/report_items?id=eq." + id + "&user_id=eq." + userId;
 
-        HttpEntity<Void> entity = new HttpEntity<>(createHeaders());
-        ResponseEntity<String> response;
+        HttpHeaders headers = createHeaders();
+        headers.set("Prefer", "return=representation");
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        ResponseEntity<List<Map<String, Object>>> response;
         try {
-            response = restTemplate.exchange(url, HttpMethod.DELETE, entity, String.class);
+            response = restTemplate.exchange(
+                    url,
+                    HttpMethod.DELETE,
+                    entity,
+                    new ParameterizedTypeReference<List<Map<String, Object>>>() {}
+            );
         } catch (HttpClientErrorException e) {
             throw mapClientError("report_items", e);
         }
-        return response.getStatusCode().is2xxSuccessful();
+
+        List<Map<String, Object>> rows = response.getBody();
+        return rows != null && !rows.isEmpty();
     }
 
     public ReportItem updateStatus(Long id, String status) {
@@ -197,10 +215,11 @@ public class SupabaseReportRepository {
     }
 
     private HttpHeaders createHeaders() {
+        String key = supabaseServiceKey == null || supabaseServiceKey.isBlank() ? supabaseKey : supabaseServiceKey;
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("apikey", supabaseKey);
-        headers.set("Authorization", "Bearer " + supabaseKey);
+        headers.set("apikey", key);
+        headers.set("Authorization", "Bearer " + key);
         return headers;
     }
 
@@ -226,18 +245,19 @@ public class SupabaseReportRepository {
         item.setLocation(toText(row.get("location")));
         item.setImageName(toText(row.get("image_name")));
         item.setStatus(toText(row.get("status")));
-        item.setCreatedAt(parseDateTime(row.get("created_at")));
-        item.setUpdatedAt(parseDateTime(row.get("updated_at")));
+        item.setCreatedAt(toDateTime(row.get("created_at")));
+        item.setUpdatedAt(toDateTime(row.get("updated_at")));
         return item;
     }
 
     private UserDashboardSummary mapSummaryRow(Map<String, Object> row, Long userId) {
         UserDashboardSummary summary = new UserDashboardSummary();
+        summary.setUserId(userId);
         summary.setEmail(valueOrFallback(toText(row.get("email")), ""));
         summary.setTotalReports(toLongOrZero(row.get("total_reports")));
         summary.setResolvedReports(toLongOrZero(row.get("resolved_reports")));
         summary.setAlertsCount(toLongOrZero(row.get("alerts_count")));
-        summary.setLastReportAt(parseDateTime(row.get("last_report_at")));
+        summary.setLastReportAt(toDateTime(row.get("last_report_at")));
         return summary;
     }
 
@@ -245,6 +265,7 @@ public class SupabaseReportRepository {
         List<ReportItem> reports = listByUserId(userId);
 
         UserDashboardSummary summary = new UserDashboardSummary();
+        summary.setUserId(userId);
         summary.setEmail(reports.stream().map(ReportItem::getEmail).filter(v -> v != null && !v.isBlank()).findFirst().orElse(""));
         summary.setTotalReports(reports.size());
         summary.setResolvedReports(reports.stream()
@@ -252,8 +273,7 @@ public class SupabaseReportRepository {
                 .count());
         summary.setAlertsCount(reports.stream()
                 .filter(r -> {
-                    String status = valueOrFallback(r.getStatus(), "").trim();
-                    return "Pending".equalsIgnoreCase(status) || "In-Progress".equalsIgnoreCase(status);
+                    return ReportStatus.isActive(r.getStatus());
                 })
                 .count());
         summary.setLastReportAt(reports.stream()
@@ -263,58 +283,6 @@ public class SupabaseReportRepository {
                 .orElse(null));
 
         return summary;
-    }
-
-    private LocalDateTime parseDateTime(Object value) {
-        if (value == null) {
-            return null;
-        }
-        String text = value.toString();
-        try {
-            return OffsetDateTime.parse(text).toLocalDateTime();
-        } catch (Exception ignored) {
-            try {
-                return LocalDateTime.parse(text);
-            } catch (Exception ignoredAgain) {
-                return null;
-            }
-        }
-    }
-
-    private String toText(Object value) {
-        return value == null ? null : value.toString();
-    }
-
-    private Long toLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        return Long.parseLong(value.toString());
-    }
-
-    private long toLongOrZero(Object value) {
-        if (value == null) {
-            return 0L;
-        }
-        try {
-            if (value instanceof Number number) {
-                return number.longValue();
-            }
-            return Long.parseLong(value.toString());
-        } catch (Exception ignored) {
-            return 0L;
-        }
-    }
-
-    private String normalizeEmail(String value) {
-        if (value == null) {
-            return "";
-        }
-        String input = value.trim().toLowerCase();
-        return input;
     }
 
     private String valueOrFallback(String value, String fallback) {

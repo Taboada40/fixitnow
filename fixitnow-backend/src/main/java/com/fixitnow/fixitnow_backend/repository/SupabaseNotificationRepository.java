@@ -8,18 +8,21 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
-import org.springframework.web.util.UriUtils;
 
-import java.nio.charset.StandardCharsets;
-import java.time.LocalDateTime;
-import java.time.OffsetDateTime;
+import java.net.http.HttpClient;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+
+import static com.fixitnow.fixitnow_backend.util.SupabaseRowUtils.toBoolean;
+import static com.fixitnow.fixitnow_backend.util.SupabaseRowUtils.toDateTime;
+import static com.fixitnow.fixitnow_backend.util.SupabaseRowUtils.toLong;
+import static com.fixitnow.fixitnow_backend.util.SupabaseRowUtils.toText;
 
 @Repository
 public class SupabaseNotificationRepository {
@@ -30,7 +33,10 @@ public class SupabaseNotificationRepository {
     @Value("${supabase.key}")
     private String supabaseKey;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    @Value("${supabase.service-key:}")
+    private String supabaseServiceKey;
+
+    private final RestTemplate restTemplate = new RestTemplate(new JdkClientHttpRequestFactory(HttpClient.newHttpClient()));
 
     public NotificationItem insert(NotificationItem notification) {
         String url = supabaseUrl + "/rest/v1/notifications";
@@ -81,18 +87,10 @@ public class SupabaseNotificationRepository {
         return mapRow(rows.get(0));
     }
 
-    public List<NotificationItem> listForUser(Long userId, String email) {
-        if (userId != null) {
-            List<NotificationItem> byId = listForUserById(userId);
-            if (!byId.isEmpty()) {
-                return byId;
-            }
+    public List<NotificationItem> listForUser(Long userId) {
+        if (userId == null) {
+            return List.of();
         }
-
-        return listForUserByEmail(email);
-    }
-
-    private List<NotificationItem> listForUserById(Long userId) {
         String url = supabaseUrl + "/rest/v1/notifications?select=*&recipient_role=eq.USER&recipient_user_id=eq."
                 + userId
                 + "&order=created_at.desc";
@@ -111,37 +109,6 @@ public class SupabaseNotificationRepository {
             if (responseBody.contains("recipient_user_id")) {
                 return List.of();
             }
-            throw mapClientError("notifications", e);
-        }
-
-        List<Map<String, Object>> rows = response.getBody();
-        if (rows == null) {
-            return List.of();
-        }
-
-        return rows.stream().map(this::mapRow).collect(Collectors.toList());
-    }
-
-    private List<NotificationItem> listForUserByEmail(String email) {
-        String normalizedEmail = normalizeEmail(email);
-        if (normalizedEmail.isBlank()) {
-            return List.of();
-        }
-
-        String url = supabaseUrl + "/rest/v1/notifications?select=*&recipient_role=eq.USER&recipient_email=eq."
-                + UriUtils.encode(normalizedEmail, StandardCharsets.UTF_8)
-                + "&order=created_at.desc";
-
-        HttpEntity<Void> entity = new HttpEntity<>(createHeaders());
-        ResponseEntity<List<Map<String, Object>>> response;
-        try {
-            response = restTemplate.exchange(
-                    url,
-                    HttpMethod.GET,
-                    entity,
-                    new ParameterizedTypeReference<List<Map<String, Object>>>() {}
-            );
-        } catch (HttpClientErrorException e) {
             throw mapClientError("notifications", e);
         }
 
@@ -178,10 +145,11 @@ public class SupabaseNotificationRepository {
     }
 
     private HttpHeaders createHeaders() {
+        String key = supabaseServiceKey == null || supabaseServiceKey.isBlank() ? supabaseKey : supabaseServiceKey;
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("apikey", supabaseKey);
-        headers.set("Authorization", "Bearer " + supabaseKey);
+        headers.set("apikey", key);
+        headers.set("Authorization", "Bearer " + key);
         return headers;
     }
 
@@ -201,59 +169,8 @@ public class SupabaseNotificationRepository {
         item.setTitle(toText(row.get("title")));
         item.setMessage(toText(row.get("message")));
         item.setIsRead(toBoolean(row.get("is_read")));
-        item.setCreatedAt(parseDateTime(row.get("created_at")));
+        item.setCreatedAt(toDateTime(row.get("created_at")));
         return item;
-    }
-
-    private LocalDateTime parseDateTime(Object value) {
-        if (value == null) {
-            return null;
-        }
-        String text = value.toString();
-        try {
-            return OffsetDateTime.parse(text).toLocalDateTime();
-        } catch (Exception ignored) {
-            try {
-                return LocalDateTime.parse(text);
-            } catch (Exception ignoredAgain) {
-                return null;
-            }
-        }
-    }
-
-    private String toText(Object value) {
-        return value == null ? null : value.toString();
-    }
-
-    private Long toLong(Object value) {
-        if (value == null) {
-            return null;
-        }
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        return Long.parseLong(value.toString());
-    }
-
-    private Boolean toBoolean(Object value) {
-        if (value == null) {
-            return false;
-        }
-        if (value instanceof Boolean b) {
-            return b;
-        }
-        return Boolean.parseBoolean(value.toString());
-    }
-
-    private String normalizeEmail(String value) {
-        if (value == null) {
-            return "";
-        }
-        String input = value.trim().toLowerCase();
-        if (input.isBlank()) {
-            return input;
-        }
-        return input.contains("@") ? input : input + "@project.local";
     }
 
     private IllegalStateException mapClientError(String tableName, HttpClientErrorException e) {

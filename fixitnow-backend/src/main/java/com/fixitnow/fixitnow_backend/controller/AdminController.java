@@ -2,15 +2,16 @@ package com.fixitnow.fixitnow_backend.controller;
 
 import com.fixitnow.fixitnow_backend.model.NotificationItem;
 import com.fixitnow.fixitnow_backend.model.ReportItem;
+import com.fixitnow.fixitnow_backend.model.ReportStatus;
 import com.fixitnow.fixitnow_backend.model.StatusUpdateRequest;
 import com.fixitnow.fixitnow_backend.model.UserProfile;
 import com.fixitnow.fixitnow_backend.service.NotificationService;
 import com.fixitnow.fixitnow_backend.service.ProfileService;
 import com.fixitnow.fixitnow_backend.service.ReportService;
+import com.fixitnow.fixitnow_backend.util.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -21,20 +22,16 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 @RestController
 @RequestMapping("/api/admin")
-@CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true")
 public class AdminController {
-
-    private static final Set<String> ALLOWED_STATUSES = Set.of("pending", "in-progress", "fixed", "cancelled");
 
     private final ReportService reportService;
     private final ProfileService profileService;
     private final NotificationService notificationService;
 
-    @Value("${app.admin.email:admin@cit.edu}")
+    @Value("${app.admin.email:}")
     private String configuredAdminEmail;
 
     public AdminController(ReportService reportService, ProfileService profileService, NotificationService notificationService) {
@@ -44,8 +41,11 @@ public class AdminController {
     }
 
     @GetMapping("/reports")
-    public ResponseEntity<?> getAllReports(@RequestParam("adminEmail") String adminEmail) {
-        if (!isAdmin(adminEmail)) {
+    public ResponseEntity<?> getAllReports(
+            @RequestParam(value = "adminUserId", required = false) Long adminUserId,
+            @RequestParam(value = "adminEmail", required = false) String adminEmail
+    ) {
+        if (!isAdmin(adminUserId, adminEmail)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Admin access required"));
         }
 
@@ -54,8 +54,11 @@ public class AdminController {
     }
 
     @GetMapping("/summary")
-    public ResponseEntity<?> getSummary(@RequestParam("adminEmail") String adminEmail) {
-        if (!isAdmin(adminEmail)) {
+    public ResponseEntity<?> getSummary(
+            @RequestParam(value = "adminUserId", required = false) Long adminUserId,
+            @RequestParam(value = "adminEmail", required = false) String adminEmail
+    ) {
+        if (!isAdmin(adminUserId, adminEmail)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Admin access required"));
         }
 
@@ -79,15 +82,17 @@ public class AdminController {
 
     @PutMapping("/reports/{id}/status")
     public ResponseEntity<?> updateReportStatus(@PathVariable("id") Long id, @RequestBody StatusUpdateRequest request) {
-        if (!isAdmin(request.getAdminEmail())) {
+        if (request == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Status payload is required"));
+        }
+        if (!isAdmin(request.getAdminUserId(), request.getAdminEmail())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Admin access required"));
         }
         if (request.getStatus() == null || request.getStatus().isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("message", "Status is required"));
         }
 
-        String normalized = request.getStatus().trim().toLowerCase();
-        if (!ALLOWED_STATUSES.contains(normalized)) {
+        if (!ReportStatus.isAllowed(request.getStatus())) {
             return ResponseEntity.badRequest().body(Map.of("message", "Invalid status value"));
         }
 
@@ -105,8 +110,11 @@ public class AdminController {
     }
 
     @GetMapping("/notifications")
-    public ResponseEntity<?> getAdminNotifications(@RequestParam("adminEmail") String adminEmail) {
-        if (!isAdmin(adminEmail)) {
+    public ResponseEntity<?> getAdminNotifications(
+            @RequestParam(value = "adminUserId", required = false) Long adminUserId,
+            @RequestParam(value = "adminEmail", required = false) String adminEmail
+    ) {
+        if (!isAdmin(adminUserId, adminEmail)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Admin access required"));
         }
 
@@ -114,31 +122,28 @@ public class AdminController {
         return ResponseEntity.ok(notifications);
     }
 
-    private boolean isAdmin(String email) {
-        String normalizedEmail = normalizeEmail(email);
+    private boolean isAdmin(Long userId, String email) {
+        if (userId != null) {
+            return profileService.getById(userId)
+                    .map(UserProfile::getRole)
+                    .map(role -> role != null && role.equalsIgnoreCase("ADMIN"))
+                    .orElse(false);
+        }
+
+        String normalizedEmail = StringUtils.normalizeEmail(email);
         if (normalizedEmail.isBlank()) {
             return false;
         }
 
-        if (normalizedEmail.equals(normalizeEmail(configuredAdminEmail))) {
+        if (!StringUtils.normalizeEmail(configuredAdminEmail).isBlank()
+                && normalizedEmail.equals(StringUtils.normalizeEmail(configuredAdminEmail))) {
             profileService.ensureAdminProfile(normalizedEmail, "admin", "Admin", "User");
             return true;
         }
 
-        return profileService.getByEmail(email)
+        return profileService.getByEmail(normalizedEmail)
                 .map(UserProfile::getRole)
                 .map(role -> role != null && role.equalsIgnoreCase("ADMIN"))
                 .orElse(false);
-    }
-
-    private String normalizeEmail(String value) {
-        if (value == null) {
-            return "";
-        }
-        String input = value.trim().toLowerCase();
-        if (input.isBlank()) {
-            return input;
-        }
-        return input.contains("@") ? input : input + "@project.local";
     }
 }

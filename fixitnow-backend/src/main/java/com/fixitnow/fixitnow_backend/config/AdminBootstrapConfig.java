@@ -3,6 +3,7 @@ package com.fixitnow.fixitnow_backend.config;
 import com.fixitnow.fixitnow_backend.model.UserRequest;
 import com.fixitnow.fixitnow_backend.repository.UserRepository;
 import com.fixitnow.fixitnow_backend.service.ProfileService;
+import com.fixitnow.fixitnow_backend.util.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -22,10 +23,10 @@ public class AdminBootstrapConfig {
     @Value("${app.admin.bootstrap.enabled:true}")
     private boolean bootstrapEnabled;
 
-    @Value("${app.admin.email:admin@cit.edu}")
+    @Value("${app.admin.email:}")
     private String adminEmail;
 
-    @Value("${app.admin.password:admin12345}")
+    @Value("${app.admin.password:}")
     private String adminPassword;
 
     public AdminBootstrapConfig(UserRepository userRepository, ProfileService profileService) {
@@ -39,7 +40,7 @@ public class AdminBootstrapConfig {
             return;
         }
 
-        String normalizedEmail = normalizeEmail(adminEmail);
+        String normalizedEmail = StringUtils.normalizeEmail(adminEmail);
         if (normalizedEmail.isBlank() || adminPassword == null || adminPassword.isBlank()) {
             return;
         }
@@ -69,16 +70,5 @@ public class AdminBootstrapConfig {
         }
 
         profileService.ensureAdminProfile(normalizedEmail, "admin", "Admin", "User");
-    }
-
-    private String normalizeEmail(String value) {
-        if (value == null) {
-            return "";
-        }
-        String input = value.trim().toLowerCase(Locale.ROOT);
-        if (input.isBlank()) {
-            return input;
-        }
-        return input.contains("@") ? input : input + "@project.local";
     }
 }

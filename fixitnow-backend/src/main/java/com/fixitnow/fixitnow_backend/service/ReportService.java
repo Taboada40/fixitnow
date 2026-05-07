@@ -2,6 +2,7 @@ package com.fixitnow.fixitnow_backend.service;
 
 import com.fixitnow.fixitnow_backend.model.ReportItem;
 import com.fixitnow.fixitnow_backend.model.ReportRequest;
+import com.fixitnow.fixitnow_backend.model.ReportStatus;
 import com.fixitnow.fixitnow_backend.model.UserProfile;
 import com.fixitnow.fixitnow_backend.model.UserDashboardSummary;
 import com.fixitnow.fixitnow_backend.repository.SupabaseReportRepository;
@@ -123,19 +124,6 @@ public class ReportService {
     }
 
     private String normalizeStatus(String value) {
-        if (value == null || value.isBlank()) {
-            return "Pending";
-        }
-        String normalized = value.trim();
-        if ("In-Progress".equalsIgnoreCase(normalized)) {
-            return "In-Progress";
-        }
-        if ("Fixed".equalsIgnoreCase(normalized)) {
-            return "Fixed";
-        }
-        if ("Cancelled".equalsIgnoreCase(normalized)) {
-            return "Cancelled";
-        }
-        return "Pending";
+        return ReportStatus.from(value).label();
     }
 }

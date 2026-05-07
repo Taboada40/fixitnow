@@ -1,24 +1,23 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { API_BASE, getErrorMessage } from '../utils/constants';
+import { getErrorMessage } from '../utils/constants';
+import { apiGet, useSession } from '../utils/profileSession';
 
 const POLL_INTERVAL_MS = 8000;
 
 const UserNotifications = () => {
     const navigate = useNavigate();
-    const storedSession = useMemo(() => JSON.parse(localStorage.getItem('session') || 'null'), []);
-    const authSession = storedSession?.session || storedSession;
-    const userId = storedSession?.profile?.id || null;
-    const email = storedSession?.profile?.email || authSession?.user?.email;
-    const role = (storedSession?.profile?.role || 'STUDENT').toUpperCase();
+    const session = useSession();
+    const profile = session?.profile || {};
+    const userId = profile?.id || null;
+    const role = (profile?.role || 'STUDENT').toUpperCase();
 
     const [notifications, setNotifications] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
     useEffect(() => {
-        if (!storedSession) {
+        if (!session) {
             navigate('/login');
             return;
         }
@@ -28,24 +27,14 @@ const UserNotifications = () => {
         }
 
         const loadNotifications = async () => {
-            if (!userId && !email) {
+            if (!userId) {
                 setError('Unable to load notifications. Please login again.');
                 setLoading(false);
                 return;
             }
 
             try {
-                const params = new URLSearchParams();
-                if (userId) {
-                    params.set('userId', String(userId));
-                }
-                if (email) {
-                    params.set('email', email);
-                }
-
-                const res = await axios.get(`${API_BASE}/api/notifications?${params.toString()}`, {
-                    withCredentials: true
-                });
+                const res = await apiGet('/api/notifications', { params: { userId } });
                 setNotifications(Array.isArray(res.data) ? res.data : []);
                 setError('');
             } catch (err) {
@@ -66,25 +55,15 @@ const UserNotifications = () => {
             clearInterval(intervalId);
             window.removeEventListener('focus', onFocus);
         };
-    }, [storedSession, role, userId, email, navigate]);
-
-    const handleLogout = () => {
-        localStorage.removeItem('session');
-        navigate('/login');
-    };
+    }, [session, role, userId, navigate]);
 
     return (
         <div className="profile-page">
             <div className="profile-card">
                 <div className="profile-top">
                     <div>
-                        <h2>Notifications</h2>
+                            <h2 className="ui-page-title">Notifications</h2>
                         <p>Updates when admin reviews your reports</p>
-                    </div>
-                    <div className="profile-top-actions">
-                        <button className="profile-nav-btn" onClick={() => navigate('/dashboard')}>Dashboard</button>
-                        <button className="profile-nav-btn" onClick={() => navigate('/reports')}>Report History</button>
-                        <button className="profile-nav-btn danger" onClick={handleLogout}>Logout</button>
                     </div>
                 </div>
 

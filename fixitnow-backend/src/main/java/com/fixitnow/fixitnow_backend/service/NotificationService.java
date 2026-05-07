@@ -38,8 +38,8 @@ public class NotificationService {
         notificationRepository.insert(item);
     }
 
-    public List<NotificationItem> listUserNotifications(Long userId, String email) {
-        return notificationRepository.listForUser(userId, email);
+    public List<NotificationItem> listUserNotifications(Long userId) {
+        return notificationRepository.listForUser(userId);
     }
 
     public List<NotificationItem> listAdminNotifications() {

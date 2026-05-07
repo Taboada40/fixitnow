@@ -1,13 +1,17 @@
 import React, { useState } from 'react';
-import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
-import { API_BASE, getErrorMessage } from '../utils/constants';
+import { getErrorMessage } from '../utils/constants';
+import { apiPost, fetchLatestSessionProfile, setSession } from '../utils/profileSession';
 
 const Login = () => {
     const [creds, setCreds] = useState({ email: '', password: '' });
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
+
+    const fetchLatestProfile = async ({ profileId, identifier, sessionSnapshot }) => {
+        return fetchLatestSessionProfile({ profileId, identifier, sessionSnapshot });
+    };
 
     const handleLogin = async (e) => {
         e.preventDefault();
@@ -25,14 +29,69 @@ const Login = () => {
 
         setLoading(true);
         try {
-            const res = await axios.post(`${API_BASE}/api/auth/login`, {
+            const loginRes = await apiPost('/api/auth/login', {
                 ...creds,
                 email: identifier
-            }, {
-                withCredentials: true
+            }, { auth: false });
+
+            const sessionPayload = loginRes?.data || {};
+            const sessionDetails = sessionPayload?.session || {};
+            const accessToken = sessionPayload?.accessToken
+                || sessionDetails?.access_token
+                || sessionDetails?.accessToken
+                || sessionPayload?.access_token
+                || '';
+
+            if (!accessToken) {
+                throw new Error('Login succeeded but no access token was returned.');
+            }
+
+            const loginProfile = loginRes?.data?.profile || {};
+            const profileId = loginProfile?.id;
+            const sessionSnapshot = {
+                ...sessionPayload,
+                accessToken,
+                session: {
+                    ...sessionDetails,
+                    access_token: accessToken,
+                    token_type: sessionDetails?.token_type || sessionPayload?.tokenType || 'bearer'
+                }
+            };
+            const latestProfile = await fetchLatestProfile({
+                profileId,
+                identifier: loginProfile?.email || loginRes?.data?.session?.user?.email || identifier,
+                sessionSnapshot
             });
-            localStorage.setItem('session', JSON.stringify(res.data));
-            const role = (res.data?.profile?.role || 'STUDENT').toUpperCase();
+            if (!latestProfile?.email && !latestProfile?.id) {
+                throw new Error('Unable to load latest profile data.');
+            }
+
+            const existingUser = loginRes.data?.session?.user || {};
+            const existingMetadata = existingUser?.user_metadata || {};
+            const nextUserMetadata = {
+                ...existingMetadata,
+                ...(latestProfile.firstName ? { first_name: latestProfile.firstName } : {}),
+                ...(latestProfile.lastName ? { last_name: latestProfile.lastName } : {}),
+                ...(latestProfile.username ? { username: latestProfile.username } : {}),
+                ...(latestProfile.phoneNumber ? { phone_number: latestProfile.phoneNumber } : {}),
+                ...(latestProfile.role ? { role: String(latestProfile.role).toUpperCase() } : {})
+            };
+
+            const hydratedSession = {
+                ...sessionSnapshot,
+                profile: latestProfile,
+                session: {
+                    ...(sessionSnapshot.session || {}),
+                    user: {
+                        ...existingUser,
+                        email: latestProfile.email || existingUser?.email || identifier,
+                        user_metadata: nextUserMetadata
+                    }
+                }
+            };
+
+            setSession(hydratedSession);
+            const role = (latestProfile.role || loginProfile.role || '').toUpperCase();
             if (role === 'ADMIN') {
                 navigate('/admin/dashboard');
             } else {
@@ -41,7 +100,7 @@ const Login = () => {
         } catch (err) {
             console.error('Login Error:', err);
             if (!err.response) {
-                setError('Cannot reach server. Please make sure backend is running on port 8080.');
+                setError(err?.message || 'Cannot reach server. Please make sure backend is running on port 8080.');
                 return;
             }
 
@@ -73,6 +132,7 @@ const Login = () => {
                         <div className="form-group">
                             <label>Email</label>
                             <input
+                                className="ui-input"
                                 type="text"
                                 required
                                 value={creds.email}
@@ -82,6 +142,7 @@ const Login = () => {
                         <div className="form-group">
                             <label>Password</label>
                             <input
+                                className="ui-input"
                                 type="password"
                                 required
                                 value={creds.password}
@@ -91,7 +152,7 @@ const Login = () => {
                         <div className="forgot-password">
                             <span>Forgot password?</span>
                         </div>
-                        <button type="submit" className="btn-builder" disabled={loading}>
+                        <button type="submit" className="ui-button ui-button--primary ui-button--block" disabled={loading}>
                             {loading ? 'Logging in...' : 'Log in'}
                         </button>
                     </form>

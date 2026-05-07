@@ -1,13 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import axios from 'axios';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { API_BASE } from '../utils/constants';
+import { getErrorMessage } from '../utils/constants';
+import { apiPost, useSession } from '../utils/profileSession';
 
 const ReportIssue = () => {
     const navigate = useNavigate();
-    const storedSession = useMemo(() => JSON.parse(localStorage.getItem('session') || 'null'), []);
-    const role = (storedSession?.profile?.role || 'STUDENT').toUpperCase();
-    const userId = storedSession?.profile?.id;
+    const session = useSession();
+    const profile = session?.profile || {};
+    const role = (profile?.role || 'STUDENT').toUpperCase();
+    const userId = profile?.id;
 
     const [formData, setFormData] = useState({
         description: '',
@@ -19,23 +20,18 @@ const ReportIssue = () => {
     const [submitting, setSubmitting] = useState(false);
 
     useEffect(() => {
-        if (!storedSession) {
+        if (!session) {
             navigate('/login');
             return;
         }
         if (role === 'ADMIN') {
             navigate('/admin/dashboard');
         }
-    }, [storedSession, navigate, role]);
+    }, [session, navigate, role]);
 
-    if (!storedSession) {
+    if (!session) {
         return null;
     }
-
-    const handleLogout = () => {
-        localStorage.removeItem('session');
-        navigate('/login');
-    };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -57,21 +53,19 @@ const ReportIssue = () => {
 
         setSubmitting(true);
         try {
-            await axios.post(`${API_BASE}/api/reports`, {
+            await apiPost('/api/reports', {
                 userId,
                 description: formData.description,
                 location: formData.location,
                 imageName: formData.imageName || null,
                 status: 'Pending'
-            }, {
-                withCredentials: true
             });
 
             setFormData({ description: '', location: '', imageName: '' });
             setSuccess('Report submitted successfully.');
             navigate('/dashboard');
         } catch (err) {
-            const message = err.response?.data?.message || 'Failed to submit report.';
+            const message = getErrorMessage(err, 'Failed to submit report.');
             setError(message);
         } finally {
             setSubmitting(false);
@@ -83,13 +77,7 @@ const ReportIssue = () => {
             <div className="profile-card report-issue-card">
                 <div className="profile-top">
                     <div>
-                        <h2>Report Issue</h2>
-                    </div>
-                    <div className="profile-top-actions">
-                        <button className="profile-nav-btn" onClick={() => navigate('/profile')}>Profile</button>
-                        <button className="profile-nav-btn" onClick={() => navigate('/notifications')}>Notifications</button>
-                        <button className="profile-nav-btn" onClick={() => navigate('/reports')}>Report History</button>
-                        <button className="profile-nav-btn danger" onClick={handleLogout}>Logout</button>
+                        <h2 className="ui-page-title">Report Issue</h2>
                     </div>
                 </div>
 
@@ -117,7 +105,7 @@ const ReportIssue = () => {
                     <div className="form-group">
                         <label>Description:</label>
                         <textarea
-                            className="report-textarea"
+                            className="report-textarea ui-textarea"
                             required
                             value={formData.description}
                             onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
@@ -127,6 +115,7 @@ const ReportIssue = () => {
                     <div className="form-group report-location-group">
                         <label>Location:</label>
                         <input
+                            className="ui-input"
                             type="text"
                             required
                             value={formData.location}
@@ -135,7 +124,7 @@ const ReportIssue = () => {
                     </div>
 
                     <div className="report-submit-row">
-                        <button className="btn-builder report-submit-btn" type="submit" disabled={submitting}>
+                        <button className="report-submit-btn ui-button ui-button--primary" type="submit" disabled={submitting}>
                             {submitting ? 'SUBMITTING...' : 'SUBMIT REPORT'}
                         </button>
                     </div>

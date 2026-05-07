@@ -7,7 +7,7 @@ public class StringUtils {
 
     public static String normalizeEmail(String value) {
         if (value == null) {
-            return null;
+            return "";
         }
         return value.trim().toLowerCase();
     }

@@ -1,4 +1,4 @@
-export const API_BASE = 'http://localhost:8080';
+export const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8080';
 
 export const STATUS_OPTIONS = ['Pending', 'In-Progress', 'Fixed', 'Cancelled'];
 
@@ -8,8 +8,6 @@ export const STATUS_COLORS = {
     'Fixed': '#4ade80',
     'Cancelled': '#ff8a8a',
 };
-
-export const DEFAULT_ADMIN_EMAIL = 'admin@cit.edu';
 
 export const getErrorMessage = (err, fallback) => {
     let raw = err?.response?.data;
@@ -39,5 +37,5 @@ export const normalizeEmail = (value) => {
     if (!input) {
         return '';
     }
-    return input.includes('@') ? input : `${input}@project.local`;
+    return input;
 };
