@@ -58,6 +58,9 @@ const Profile = () => {
     const [success, setSuccess] = useState('');
     const imageInputRef = useRef(null);
 
+    // FIX: Track if profile has been loaded to prevent infinite loop
+    const hasLoadedRef = useRef(false);
+
     const persistSessionAndForm = useCallback((profile) => {
         const latestProfile = profile || {};
         const newProfileId = latestProfile.id || authenticatedUserId;
@@ -161,6 +164,7 @@ const Profile = () => {
         setFormData(prev => ({ ...prev, currentPassword: '', newPassword: '', confirmPassword: '' }));
     }, [formData, authenticatedEmail]);
 
+    // FIX: Load profile only once on mount, not on every session change
     useEffect(() => {
         if (!session) {
             navigate('/login');
@@ -178,6 +182,12 @@ const Profile = () => {
             return;
         }
 
+        // Prevent infinite loop: only load if not already loaded
+        if (hasLoadedRef.current) {
+            setLoading(false);
+            return;
+        }
+
         const loadProfile = async () => {
             try {
                 const refreshedProfile = await fetchLatestSessionProfile({
@@ -186,6 +196,7 @@ const Profile = () => {
                 });
                 console.log('[Profile] Loaded profile:', refreshedProfile);
                 persistSessionAndForm(refreshedProfile);
+                hasLoadedRef.current = true;
             } catch (err) {
                 const message = err.response?.data?.message || 'Failed to load profile.';
                 setError(message);
@@ -195,7 +206,8 @@ const Profile = () => {
         };
 
         loadProfile();
-    }, [session, navigate, role, authenticatedUserId, authenticatedEmail, persistSessionAndForm]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []); // Empty dependency array - load once on mount
 
     // Revoke object URL on unmount to free memory
     useEffect(() => {
@@ -374,6 +386,7 @@ const Profile = () => {
                                 value={formData.firstName}
                                 onChange={handleChange}
                                 disabled={saving}
+                                autoComplete="given-name"
                             />
                         </div>
                         <div className="profile-form-field">
@@ -386,6 +399,7 @@ const Profile = () => {
                                 value={formData.lastName}
                                 onChange={handleChange}
                                 disabled={saving}
+                                autoComplete="family-name"
                             />
                         </div>
                         <div className="profile-form-field">
@@ -422,6 +436,7 @@ const Profile = () => {
                                 value={formData.phoneNumber}
                                 onChange={handleChange}
                                 disabled={saving}
+                                autoComplete="tel"
                             />
                         </div>
                     </div>
@@ -440,6 +455,7 @@ const Profile = () => {
                                     onChange={handleChange}
                                     disabled={saving}
                                     placeholder="Current password"
+                                    autoComplete="current-password"
                                 />
                             </div>
                             <div className="profile-form-field">
@@ -453,6 +469,7 @@ const Profile = () => {
                                     onChange={handleChange}
                                     disabled={saving}
                                     placeholder="New password"
+                                    autoComplete="new-password"
                                 />
                             </div>
                             <div className="profile-form-field">
@@ -466,6 +483,7 @@ const Profile = () => {
                                     onChange={handleChange}
                                     disabled={saving}
                                     placeholder="Confirm new password"
+                                    autoComplete="new-password"
                                 />
                             </div>
                         </div>
