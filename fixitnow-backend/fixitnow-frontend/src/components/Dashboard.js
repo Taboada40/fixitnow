@@ -1,12 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { STATUS_COLORS, getErrorMessage, normalizeStatus } from '../utils/constants';
-import {
-    apiGet,
-    fetchProfileById,
-    mergeSessionProfile as persistProfileSession,
-    useSession
-} from '../utils/profileSession';
+import { apiGet, useSession } from '../utils/profileSession';
 
 const SearchIcon = () => (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -17,93 +12,51 @@ const SearchIcon = () => (
 
 const buildSummaryFromReports = (items) => {
     const reports = Array.isArray(items) ? items : [];
-    const totalReports = reports.length;
-    const resolvedReports = reports.filter((report) => normalizeStatus(report?.status) === 'Fixed').length;
-    const alertsCount = reports.filter((report) => {
-        const status = normalizeStatus(report?.status);
-        return status === 'Pending' || status === 'In-Progress';
-    }).length;
-
     return {
-        totalReports,
-        resolvedReports,
-        alertsCount
+        totalReports: reports.length,
+        resolvedReports: reports.filter(r => normalizeStatus(r?.status) === 'Fixed').length,
+        alertsCount: reports.filter(r => {
+            const s = normalizeStatus(r?.status);
+            return s === 'Pending' || s === 'In-Progress';
+        }).length
     };
-};
-
-const persistFreshProfile = (nextProfile) => {
-    persistProfileSession(nextProfile);
 };
 
 const Dashboard = () => {
     const navigate = useNavigate();
     const session = useSession();
-    
-    const storedProfile = session?.profile || {};
-    const [freshProfile, setFreshProfile] = useState(storedProfile);
+
+    // Read profile from session only — no independent DB fetch or session write here.
+    const profile = session?.profile || {};
     const metadataRole = session?.session?.user?.user_metadata?.role || '';
-    const role = useMemo(() => (freshProfile?.role || storedProfile?.role || metadataRole || '').toUpperCase(), [freshProfile?.role, storedProfile?.role, metadataRole]);
+    const role = useMemo(() => (profile?.role || metadataRole || '').toUpperCase(), [profile?.role, metadataRole]);
+    const activeUserId = profile?.id || null;
 
     const [filter, setFilter] = useState('All');
     const [search, setSearch] = useState('');
     const [reports, setReports] = useState([]);
-    const [summary, setSummary] = useState({
-        totalReports: 0,
-        resolvedReports: 0,
-        alertsCount: 0
-    });
+    const [summary, setSummary] = useState({ totalReports: 0, resolvedReports: 0, alertsCount: 0 });
     const [reportsError, setReportsError] = useState('');
     const [loadingReports, setLoadingReports] = useState(true);
     const [isInitialLoad, setIsInitialLoad] = useState(true);
     const isFetchingRef = useRef(false);
     const hasLoadedOnceRef = useRef(false);
-    
-    const activeUserId = useMemo(() => freshProfile?.id || storedProfile?.id || null, [freshProfile?.id, storedProfile?.id]);
 
-    const loadDashboardData = useCallback(async ({ showLoader = false } = {}) => {
-        if (!activeUserId) {
-            setReportsError('Unable to load dashboard. Please login again.');
-            setLoadingReports(false);
-            return;
-        }
-
-        if (isFetchingRef.current) {
-            return;
-        }
+    const loadReports = useCallback(async ({ showLoader = false } = {}) => {
+        if (!activeUserId || isFetchingRef.current) return;
 
         isFetchingRef.current = true;
-        if (showLoader) {
-            setLoadingReports(true);
-        }
+        if (showLoader) setLoadingReports(true);
 
         try {
-            const [profileRes, reportsRes, summaryRes] = await Promise.allSettled([
-                fetchProfileById(activeUserId),
-                apiGet('/api/reports', {
-                    params: { userId: activeUserId, _ts: Date.now() }
-                }),
-                apiGet('/api/reports/summary', {
-                    params: { userId: activeUserId, _ts: Date.now() }
-                })
+            const [reportsRes, summaryRes] = await Promise.allSettled([
+                apiGet('/api/reports', { params: { userId: activeUserId, _ts: Date.now() } }),
+                apiGet('/api/reports/summary', { params: { userId: activeUserId, _ts: Date.now() } })
             ]);
-
-            if (profileRes.status === 'fulfilled') {
-                const latestProfile = profileRes.value;
-                if (latestProfile?.id) {
-                    setFreshProfile(latestProfile);
-                    persistFreshProfile(latestProfile);
-                } else {
-                    throw new Error('Authenticated profile ID is missing.');
-                }
-            } else {
-                throw new Error('Failed to load profile data.');
-            }
 
             if (reportsRes.status === 'fulfilled') {
                 const reportItems = Array.isArray(reportsRes.value.data) ? reportsRes.value.data : [];
-                const scopedReports = activeUserId
-                    ? reportItems.filter((item) => Number(item?.userId) === Number(activeUserId))
-                    : reportItems;
+                const scopedReports = reportItems.filter(item => Number(item?.userId) === Number(activeUserId));
                 setReports(scopedReports);
 
                 if (summaryRes.status === 'fulfilled') {
@@ -115,11 +68,10 @@ const Dashboard = () => {
                 } else {
                     setSummary(buildSummaryFromReports(scopedReports));
                 }
+                setReportsError('');
             } else {
                 throw new Error('Failed to load reports data.');
             }
-
-            setReportsError('');
         } catch (err) {
             const message = !err?.response
                 ? 'Cannot reach server. Please make sure backend is running on port 8080.'
@@ -142,45 +94,32 @@ const Dashboard = () => {
     }, [activeUserId]);
 
     useEffect(() => {
-        if (!session) {
-            navigate('/login');
-            return;
-        }
-        if (role === 'ADMIN') {
-            navigate('/admin/dashboard');
+        if (!session) { navigate('/login'); return; }
+        if (role === 'ADMIN') { navigate('/admin/dashboard'); return; }
+        if (!activeUserId) {
+            setReportsError('Unable to load dashboard. Please login again.');
+            setLoadingReports(false);
             return;
         }
 
-        loadDashboardData({ showLoader: !hasLoadedOnceRef.current });
+        loadReports({ showLoader: !hasLoadedOnceRef.current });
 
         let refreshTimeout;
         const handleRefresh = () => {
             clearTimeout(refreshTimeout);
-            refreshTimeout = setTimeout(() => {
-                loadDashboardData({ showLoader: false });
-            }, 1000);
+            refreshTimeout = setTimeout(() => loadReports({ showLoader: false }), 1000);
         };
-
         const onFocus = handleRefresh;
-        const onVisible = () => {
-            if (document.visibilityState === 'visible') {
-                handleRefresh();
-            }
-        };
-        
+        const onVisible = () => { if (document.visibilityState === 'visible') handleRefresh(); };
+
         window.addEventListener('focus', onFocus);
         document.addEventListener('visibilitychange', onVisible);
-
         return () => {
             window.removeEventListener('focus', onFocus);
             document.removeEventListener('visibilitychange', onVisible);
             clearTimeout(refreshTimeout);
         };
-    }, [session, navigate, role, loadDashboardData]);
-
-    const handleSearchChange = (value) => {
-        setSearch(value);
-    };
+    }, [session, navigate, role, activeUserId, loadReports]);
 
     const filtered = useMemo(() => {
         return reports.filter(issue => {
@@ -192,10 +131,6 @@ const Dashboard = () => {
         });
     }, [reports, filter, search]);
 
-    const activeCount   = summary.totalReports;
-    const resolvedCount = summary.resolvedReports;
-    const alertCount    = summary.alertsCount;
-
     return (
         <div className="db-wrapper">
             <main className="db-main">
@@ -205,15 +140,15 @@ const Dashboard = () => {
                 <div className="db-stats">
                     <div className="db-stat-card">
                         <span className="db-stat-label">Active Reports</span>
-                        <span className="db-stat-value">{String(activeCount).padStart(2, '0')}</span>
+                        <span className="db-stat-value">{String(summary.totalReports).padStart(2, '0')}</span>
                     </div>
                     <div className="db-stat-card">
                         <span className="db-stat-label">Resolved</span>
-                        <span className="db-stat-value">{String(resolvedCount).padStart(2, '0')}</span>
+                        <span className="db-stat-value">{String(summary.resolvedReports).padStart(2, '0')}</span>
                     </div>
                     <div className="db-stat-card">
                         <span className="db-stat-label">Alerts</span>
-                        <span className="db-stat-value">{String(alertCount).padStart(2, '0')}</span>
+                        <span className="db-stat-value">{String(summary.alertsCount).padStart(2, '0')}</span>
                     </div>
                 </div>
 
@@ -239,7 +174,7 @@ const Dashboard = () => {
                             type="text"
                             placeholder="Search your reported issue"
                             value={search}
-                            onChange={e => handleSearchChange(e.target.value)}
+                            onChange={e => setSearch(e.target.value)}
                         />
                         <span className="db-search-icon"><SearchIcon /></span>
                     </div>
@@ -254,15 +189,13 @@ const Dashboard = () => {
                         filtered.map(issue => {
                             const status = normalizeStatus(issue.status);
                             const color = STATUS_COLORS[status] || STATUS_COLORS.default;
-                            const statusDisplay = status.replace('-', ' ');
-
                             return (
                                 <div key={issue.id} className="db-issue-card">
                                     <div className="db-issue-header">
                                         <div className="db-issue-id-group">
                                             <span className="db-issue-id">#{issue.id}</span>
                                             <span className="db-issue-status" style={{ backgroundColor: color }}>
-                                                {statusDisplay}
+                                                {status.replace('-', ' ')}
                                             </span>
                                         </div>
                                     </div>
@@ -283,7 +216,7 @@ const Dashboard = () => {
                 </div>
 
                 <div className="db-footer">
-                    <button 
+                    <button
                         className="db-report-btn ui-button ui-button--primary"
                         onClick={() => navigate('/report-issue')}
                     >

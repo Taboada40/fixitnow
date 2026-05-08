@@ -10,8 +10,7 @@ import {
 } from '../utils/profileSession';
 
 const buildProfileImageSrc = (profile) => {
-    // Use only profileImageUrl as the single source of truth
-    return profile?.profileImageUrl || '';
+    return profile?.profileImageUrl || profile?.profile_image_url || '';
 };
 
 const getInitials = (firstName, lastName, username) => {
@@ -27,7 +26,7 @@ const getInitials = (firstName, lastName, username) => {
 const Profile = () => {
     const navigate = useNavigate();
     const session = useSession();
-    
+
     const storedProfile = session?.profile || {};
     const authSession = session?.session || session || {};
     const metadataRole = authSession?.user?.user_metadata?.role || '';
@@ -47,10 +46,14 @@ const Profile = () => {
         confirmPassword: ''
     });
 
+    // Staged image: holds the File and a local blob preview URL.
+    // Nothing is uploaded to the server until "Save Changes" is clicked.
+    const [stagedImage, setStagedImage] = useState(null); // { file: File, previewUrl: string }
+    const stagedImageRef = useRef(null); // mirrors state for cleanup in useEffect
+
     const [profileId, setProfileId] = useState(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [uploadingImage, setUploadingImage] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const imageInputRef = useRef(null);
@@ -62,12 +65,13 @@ const Profile = () => {
 
         setFormData((prev) => ({
             ...prev,
-            firstName: latestProfile.firstName ?? prev.firstName,
-            lastName: latestProfile.lastName ?? prev.lastName,
-            username: latestProfile.username ?? prev.username,
-            email: latestProfile.email ?? prev.email,
-            phoneNumber: latestProfile.phoneNumber ?? prev.phoneNumber,
-            profileImageUrl: latestProfile.profileImageUrl ?? prev.profileImageUrl,
+            // Use != null so empty string "" from the DB is accepted (not fallen back to prev)
+            firstName: latestProfile.firstName != null ? latestProfile.firstName : prev.firstName,
+            lastName: latestProfile.lastName != null ? latestProfile.lastName : prev.lastName,
+            username: latestProfile.username != null ? latestProfile.username : prev.username,
+            email: latestProfile.email != null ? latestProfile.email : prev.email,
+            phoneNumber: latestProfile.phoneNumber != null ? latestProfile.phoneNumber : prev.phoneNumber,
+            profileImageUrl: latestProfile.profileImageUrl != null ? latestProfile.profileImageUrl : prev.profileImageUrl,
             currentPassword: '',
             newPassword: '',
             confirmPassword: ''
@@ -78,8 +82,11 @@ const Profile = () => {
 
     const saveProfile = useCallback(async () => {
         const effectiveEmail = (authenticatedEmail || formData.email || '').trim();
+        const activeProfileId = profileId || authenticatedUserId || null;
+
+        // Step 1: save text fields
         const profilePayload = {
-            id: profileId || authenticatedUserId || null,
+            id: activeProfileId,
             email: effectiveEmail,
             username: (formData.username || '').trim(),
             firstName: formData.firstName.trim(),
@@ -88,24 +95,71 @@ const Profile = () => {
             role: 'STUDENT'
         };
 
+        console.log('[Profile] Saving profile:', profilePayload);
         const profileRes = await apiPut('/api/profile', profilePayload);
+        console.log('[Profile] Save response:', profileRes.data);
+
         const savedProfile = profileRes.data?.profile || profileRes.data || profilePayload;
-        const latestProfile = await fetchLatestSessionProfile({
-            profileId: savedProfile?.id || profilePayload.id,
-            identifier: savedProfile?.email || effectiveEmail
-        });
+        const resolvedId = savedProfile?.id || activeProfileId;
+        const resolvedEmail = savedProfile?.email || effectiveEmail;
+
+        // Step 2: if a new picture was staged, upload it now
+        let latestProfile;
+        if (stagedImage?.file) {
+            const uploadPayload = new FormData();
+            uploadPayload.append('file', stagedImage.file);
+            uploadPayload.append('userId', String(resolvedId));
+
+            console.log('[Profile] Uploading profile picture for userId:', resolvedId);
+            const uploadRes = await apiPost('/api/profile/picture', uploadPayload);
+            console.log('[Profile] Upload response:', uploadRes.data);
+
+            const uploadedProfile = uploadRes.data?.profile || uploadRes.data || {};
+
+            latestProfile = await fetchLatestSessionProfile({
+                profileId: uploadedProfile?.id || resolvedId,
+                identifier: uploadedProfile?.email || resolvedEmail
+            });
+            console.log('[Profile] Latest profile after upload:', latestProfile);
+
+            // Clear staged image after successful upload
+            if (stagedImageRef.current?.previewUrl) {
+                URL.revokeObjectURL(stagedImageRef.current.previewUrl);
+            }
+            stagedImageRef.current = null;
+            setStagedImage(null);
+        } else {
+            latestProfile = await fetchLatestSessionProfile({
+                profileId: resolvedId,
+                identifier: resolvedEmail
+            });
+            console.log('[Profile] Latest profile after text update:', latestProfile);
+        }
+
         persistSessionAndForm(latestProfile);
-    }, [formData, authenticatedEmail, profileId, authenticatedUserId, persistSessionAndForm]);
+    }, [formData, authenticatedEmail, profileId, authenticatedUserId, persistSessionAndForm, stagedImage]);
 
     const updatePassword = useCallback(async () => {
-        const passwordPayload = {
+        const effectiveEmail = (authenticatedEmail || formData.email || '').trim();
+
+        if (!formData.currentPassword || !formData.newPassword) {
+            throw new Error('Current password and new password are required.');
+        }
+        if (formData.newPassword !== formData.confirmPassword) {
+            throw new Error('New passwords do not match.');
+        }
+        if (formData.newPassword.length < 6) {
+            throw new Error('New password must be at least 6 characters.');
+        }
+
+        await apiPost('/api/auth/password', {
+            email: effectiveEmail,
             currentPassword: formData.currentPassword,
             newPassword: formData.newPassword
-        };
+        });
 
-        await apiPost('/api/auth/password', passwordPayload);
         setFormData(prev => ({ ...prev, currentPassword: '', newPassword: '', confirmPassword: '' }));
-    }, [formData]);
+    }, [formData, authenticatedEmail]);
 
     useEffect(() => {
         if (!session) {
@@ -130,6 +184,7 @@ const Profile = () => {
                     profileId: userId,
                     identifier: authenticatedEmail || resolveSessionProfileIdentifier()
                 });
+                console.log('[Profile] Loaded profile:', refreshedProfile);
                 persistSessionAndForm(refreshedProfile);
             } catch (err) {
                 const message = err.response?.data?.message || 'Failed to load profile.';
@@ -142,6 +197,15 @@ const Profile = () => {
         loadProfile();
     }, [session, navigate, role, authenticatedUserId, authenticatedEmail, persistSessionAndForm]);
 
+    // Revoke object URL on unmount to free memory
+    useEffect(() => {
+        return () => {
+            if (stagedImageRef.current?.previewUrl) {
+                URL.revokeObjectURL(stagedImageRef.current.previewUrl);
+            }
+        };
+    }, []);
+
     const handleChange = (e) => {
         const { name, value } = e.target;
         setFormData(prev => ({ ...prev, [name]: value }));
@@ -150,23 +214,18 @@ const Profile = () => {
     };
 
     const triggerImagePicker = () => {
-        if (uploadingImage || saving) {
-            return;
-        }
+        if (saving) return;
         imageInputRef.current?.click();
     };
 
-    const handleProfileImageUpload = async (event) => {
-        if (uploadingImage || saving) {
-            return;
-        }
-        
+    // Only create a local preview — no server call here
+    const handleProfileImageSelect = (event) => {
+        if (saving) return;
+
         const file = event.target.files?.[0];
         event.target.value = '';
 
-        if (!file) {
-            return;
-        }
+        if (!file) return;
 
         const fileName = (file.name || '').toLowerCase();
         const validType = file.type === 'image/jpeg' || file.type === 'image/jpg' || file.type === 'image/png';
@@ -178,39 +237,18 @@ const Profile = () => {
             return;
         }
 
-        const activeProfileId = profileId || authenticatedUserId || null;
-        if (!activeProfileId) {
-            setError('Unable to upload picture. Please log in again.');
-            setSuccess('');
-            return;
+        // Revoke previous preview to avoid memory leak
+        if (stagedImageRef.current?.previewUrl) {
+            URL.revokeObjectURL(stagedImageRef.current.previewUrl);
         }
 
-        setUploadingImage(true);
+        const previewUrl = URL.createObjectURL(file);
+        const staged = { file, previewUrl };
+        stagedImageRef.current = staged;
+        setStagedImage(staged);
+
         setError('');
         setSuccess('');
-
-        try {
-            const uploadPayload = new FormData();
-            uploadPayload.append('file', file);
-            uploadPayload.append('userId', String(activeProfileId));
-
-            const uploadRes = await apiPost('/api/profile/picture', uploadPayload);
-
-            const uploadedProfile = uploadRes.data?.profile || uploadRes.data || {};
-            const latestProfile = await fetchLatestSessionProfile({
-                profileId: uploadedProfile?.id || activeProfileId,
-                identifier: uploadedProfile?.email || authenticatedEmail || formData.email
-            });
-            persistSessionAndForm(latestProfile);
-            setSuccess(uploadRes.data?.message || 'Profile picture uploaded successfully.');
-            setTimeout(() => setSuccess(''), 4000);
-        } catch (err) {
-            const message = err.response?.data?.message || 'Failed to upload profile picture.';
-            setError(message);
-            setTimeout(() => setError(''), 5000);
-        } finally {
-            setUploadingImage(false);
-        }
     };
 
     const handleSave = async (e) => {
@@ -230,7 +268,7 @@ const Profile = () => {
             setSuccess('All changes saved successfully.');
             setTimeout(() => setSuccess(''), 4000);
         } catch (err) {
-            const message = err.message || 'Failed to save changes.';
+            const message = err.response?.data?.message || err.message || 'Failed to save changes.';
             setError(message);
             setTimeout(() => setError(''), 5000);
         } finally {
@@ -238,10 +276,11 @@ const Profile = () => {
         }
     };
 
+    // Show local blob preview if image was staged; otherwise show saved server URL
     const profileImageSrc = useMemo(() => {
-        return buildProfileImageSrc(formData);
-    }, [formData]);
-    
+        return stagedImage?.previewUrl || buildProfileImageSrc(formData);
+    }, [stagedImage, formData]);
+
     const initials = useMemo(() => {
         return getInitials(formData.firstName, formData.lastName, formData.username);
     }, [formData.firstName, formData.lastName, formData.username]);
@@ -278,12 +317,12 @@ const Profile = () => {
                             type="button"
                             className="profile-avatar-btn"
                             onClick={triggerImagePicker}
-                            disabled={uploadingImage || saving}
+                            disabled={saving}
                             aria-label="Change profile picture"
                         >
                             {profileImageSrc ? (
                                 <img
-                                    key={formData.profileImageUrl}
+                                    key={profileImageSrc}
                                     src={profileImageSrc}
                                     alt="Profile"
                                     className="profile-avatar-img"
@@ -294,14 +333,14 @@ const Profile = () => {
                                 </span>
                             )}
                             <span className="profile-avatar-overlay">
-                                {uploadingImage ? 'Uploading...' : 'Change'}
+                                {stagedImage ? 'Change (unsaved)' : 'Change'}
                             </span>
                         </button>
                         <input
                             ref={imageInputRef}
                             type="file"
                             accept=".jpg,.jpeg,.png,image/png,image/jpeg"
-                            onChange={handleProfileImageUpload}
+                            onChange={handleProfileImageSelect}
                             style={{ display: 'none' }}
                         />
                         <div className="profile-identity-info">
@@ -314,17 +353,22 @@ const Profile = () => {
                             <span className={`profile-role-badge ${role.toLowerCase()}`}>{role}</span>
                         </div>
                     </div>
+                    {stagedImage && (
+                        <p className="profile-staged-hint">
+                            New photo selected — click <strong>Save Changes</strong> to apply.
+                        </p>
+                    )}
                     {error && <div className="error-msg">{error}</div>}
                     {success && <div className="success-msg">{success}</div>}
                 </div>
 
                 <form className="profile-form" onSubmit={handleSave}>
-                        <div className="profile-form-grid">
+                    <div className="profile-form-grid">
                         <div className="profile-form-field">
                             <label htmlFor="firstName">First Name</label>
                             <input
                                 id="firstName"
-                                    className="ui-input"
+                                className="ui-input"
                                 name="firstName"
                                 type="text"
                                 value={formData.firstName}
@@ -336,7 +380,7 @@ const Profile = () => {
                             <label htmlFor="lastName">Last Name</label>
                             <input
                                 id="lastName"
-                                    className="ui-input"
+                                className="ui-input"
                                 name="lastName"
                                 type="text"
                                 value={formData.lastName}
@@ -372,7 +416,7 @@ const Profile = () => {
                             <label htmlFor="phoneNumber">Phone Number</label>
                             <input
                                 id="phoneNumber"
-                                    className="ui-input"
+                                className="ui-input"
                                 name="phoneNumber"
                                 type="tel"
                                 value={formData.phoneNumber}
@@ -431,7 +475,7 @@ const Profile = () => {
                         <button
                             type="submit"
                             className="profile-save-btn ui-button ui-button--primary"
-                            disabled={saving || uploadingImage}
+                            disabled={saving}
                         >
                             {saving ? 'Saving...' : 'Save Changes'}
                         </button>

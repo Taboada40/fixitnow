@@ -30,7 +30,7 @@ public class ProfileService {
         if (!ValidationUtils.isNotBlank(request.getEmail())) {
             throw new IllegalArgumentException("Email is required for registration");
         }
-        
+
         // Always create a fresh profile for registration (do not merge with existing)
         UserProfile profile = new UserProfile();
         String normalizedEmail = StringUtils.normalizeEmail(request.getEmail());
@@ -65,19 +65,19 @@ public class ProfileService {
         if (request.getId() == null) {
             throw new IllegalArgumentException("User ID is required to update profile");
         }
-        
+
         UserProfile profile = resolveProfileForUpdate(request);
 
         String normalizedEmail = StringUtils.valueOrFallback(request.getEmail(), profile.getEmail());
         if (!ValidationUtils.isNotBlank(normalizedEmail)) {
             throw new IllegalArgumentException("Email is required to update profile");
         }
-        
+
         // Validate username if provided
         if (request.getUsername() != null && !ValidationUtils.isValidUsername(request.getUsername())) {
             throw new IllegalArgumentException("Username must be 3-50 characters and contain only letters, numbers, dots, hyphens, and underscores");
         }
-        
+
         // Validate phone if provided
         if (request.getPhoneNumber() != null && !ValidationUtils.isBlank(request.getPhoneNumber()) && 
             !ValidationUtils.isValidPhoneNumber(request.getPhoneNumber())) {
@@ -151,21 +151,32 @@ public class ProfileService {
         profile.setProfileImageUrl(publicUrl);
 
         Long profileUserId = requirePersistableId(profile, "profile picture update");
-        return profileRepository.updateById(profileUserId, profile);
+        UserProfile persisted = profileRepository.updateById(profileUserId, profile);
+
+        // FIX: Sync metadata including the new image URL
+        userRepository.syncUserMetadataByEmail(persisted.getEmail(), buildAuthMetadata(persisted));
+
+        return persisted;
     }
 
     private String mergeValue(String requestedValue, String existingValue, String fallback) {
-        // Prefer requested value if provided and not blank
-        if (requestedValue != null && !requestedValue.trim().isBlank()) {
-            return requestedValue.trim();
+        // FIX: Allow explicit null to mean "no change", but allow empty string to clear
+        if (requestedValue == null) {
+            return existingValue != null && !existingValue.trim().isBlank() 
+                ? existingValue.trim() 
+                : fallback;
         }
-        
-        // Fall back to existing value if valid
+
+        // Requested value is explicitly provided (including empty string "")
+        String trimmed = requestedValue.trim();
+        if (!trimmed.isBlank()) {
+            return trimmed;
+        }
+
+        // Requested value is blank/empty - use existing if valid, else fallback
         if (existingValue != null && !existingValue.trim().isBlank()) {
             return existingValue.trim();
         }
-        
-        // Use fallback as last resort
         return fallback;
     }
 
@@ -238,12 +249,14 @@ public class ProfileService {
     }
 
     private java.util.Map<String, Object> buildAuthMetadata(UserProfile profile) {
-        return java.util.Map.of(
-                "first_name", StringUtils.valueOrFallback(profile.getFirstName(), ""),
-                "last_name", StringUtils.valueOrFallback(profile.getLastName(), ""),
-                "username", StringUtils.valueOrFallback(profile.getUsername(), ""),
-                "phone_number", StringUtils.valueOrFallback(profile.getPhoneNumber(), ""),
-                "role", StringUtils.valueOrFallback(profile.getRole(), "STUDENT")
-        );
+        java.util.Map<String, Object> metadata = new java.util.HashMap<>();
+        metadata.put("first_name", StringUtils.valueOrFallback(profile.getFirstName(), ""));
+        metadata.put("last_name", StringUtils.valueOrFallback(profile.getLastName(), ""));
+        metadata.put("username", StringUtils.valueOrFallback(profile.getUsername(), ""));
+        metadata.put("phone_number", StringUtils.valueOrFallback(profile.getPhoneNumber(), ""));
+        metadata.put("role", StringUtils.valueOrFallback(profile.getRole(), "STUDENT"));
+        // FIX: Include profile image URL in auth metadata
+        metadata.put("profile_image_url", StringUtils.valueOrFallback(profile.getProfileImageUrl(), ""));
+        return metadata;
     }
 }

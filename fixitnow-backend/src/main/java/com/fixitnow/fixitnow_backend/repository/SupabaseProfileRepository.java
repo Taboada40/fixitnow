@@ -99,6 +99,7 @@ public class SupabaseProfileRepository {
             return mapRow(rows.get(0));
         }
 
+        // If response body is empty, fetch the profile we just upserted
         return findByEmail(profile.getEmail()).orElse(profile);
     }
 
@@ -390,8 +391,14 @@ public class SupabaseProfileRepository {
         body.put("first_name", profile.getFirstName());
         body.put("last_name", profile.getLastName());
         body.put("role", profile.getRole());
-        body.put("phone_number", profile.getPhoneNumber());
-        body.put("profile_picture_url", profile.getProfileImageUrl());
+        // FIX: Only include phone_number if it's not null to avoid overwriting with null
+        if (profile.getPhoneNumber() != null) {
+            body.put("phone_number", profile.getPhoneNumber());
+        }
+        // FIX: Only include profile_picture_url if it's not null to avoid overwriting with null
+        if (profile.getProfileImageUrl() != null) {
+            body.put("profile_picture_url", profile.getProfileImageUrl());
+        }
         return body;
     }
 

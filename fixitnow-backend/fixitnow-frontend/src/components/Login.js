@@ -9,23 +9,13 @@ const Login = () => {
     const [loading, setLoading] = useState(false);
     const navigate = useNavigate();
 
-    const fetchLatestProfile = async ({ profileId, identifier, sessionSnapshot }) => {
-        return fetchLatestSessionProfile({ profileId, identifier, sessionSnapshot });
-    };
-
     const handleLogin = async (e) => {
         e.preventDefault();
         setError('');
 
         const identifier = (creds.email || '').trim().toLowerCase();
-        if (!identifier) {
-            setError('Please enter your email.');
-            return;
-        }
-        if (creds.password.length < 6) {
-            setError('Password must be at least 6 characters.');
-            return;
-        }
+        if (!identifier) { setError('Please enter your email.'); return; }
+        if (creds.password.length < 6) { setError('Password must be at least 6 characters.'); return; }
 
         setLoading(true);
         try {
@@ -42,12 +32,9 @@ const Login = () => {
                 || sessionPayload?.access_token
                 || '';
 
-            if (!accessToken) {
-                throw new Error('Login succeeded but no access token was returned.');
-            }
+            if (!accessToken) throw new Error('Login succeeded but no access token was returned.');
 
             const loginProfile = loginRes?.data?.profile || {};
-            const profileId = loginProfile?.id;
             const sessionSnapshot = {
                 ...sessionPayload,
                 accessToken,
@@ -57,27 +44,32 @@ const Login = () => {
                     token_type: sessionDetails?.token_type || sessionPayload?.tokenType || 'bearer'
                 }
             };
-            const latestProfile = await fetchLatestProfile({
-                profileId,
+
+            // Always fetch fresh profile from DB — don't trust login response alone
+            const latestProfile = await fetchLatestSessionProfile({
+                profileId: loginProfile?.id,
                 identifier: loginProfile?.email || loginRes?.data?.session?.user?.email || identifier,
                 sessionSnapshot
             });
+
             if (!latestProfile?.email && !latestProfile?.id) {
                 throw new Error('Unable to load latest profile data.');
             }
 
             const existingUser = loginRes.data?.session?.user || {};
             const existingMetadata = existingUser?.user_metadata || {};
-            const nextUserMetadata = {
-                ...existingMetadata,
-                ...(latestProfile.firstName ? { first_name: latestProfile.firstName } : {}),
-                ...(latestProfile.lastName ? { last_name: latestProfile.lastName } : {}),
-                ...(latestProfile.username ? { username: latestProfile.username } : {}),
-                ...(latestProfile.phoneNumber ? { phone_number: latestProfile.phoneNumber } : {}),
-                ...(latestProfile.role ? { role: String(latestProfile.role).toUpperCase() } : {})
-            };
 
-            const hydratedSession = {
+            // Use != null so empty string "" overwrites stale metadata values
+            const nextUserMetadata = { ...existingMetadata };
+            if (latestProfile.firstName != null) nextUserMetadata.first_name = latestProfile.firstName;
+            if (latestProfile.lastName != null) nextUserMetadata.last_name = latestProfile.lastName;
+            if (latestProfile.username != null) nextUserMetadata.username = latestProfile.username;
+            if (latestProfile.phoneNumber != null) nextUserMetadata.phone_number = latestProfile.phoneNumber;
+            if (latestProfile.role != null) nextUserMetadata.role = String(latestProfile.role).toUpperCase();
+            // FIX: Include profile image URL in metadata
+            if (latestProfile.profileImageUrl != null) nextUserMetadata.profile_image_url = latestProfile.profileImageUrl;
+
+            setSession({
                 ...sessionSnapshot,
                 profile: latestProfile,
                 session: {
@@ -88,25 +80,19 @@ const Login = () => {
                         user_metadata: nextUserMetadata
                     }
                 }
-            };
+            });
 
-            setSession(hydratedSession);
             const role = (latestProfile.role || loginProfile.role || '').toUpperCase();
-            if (role === 'ADMIN') {
-                navigate('/admin/dashboard');
-            } else {
-                navigate('/dashboard');
-            }
+            navigate(role === 'ADMIN' ? '/admin/dashboard' : '/dashboard');
+
         } catch (err) {
             console.error('Login Error:', err);
             if (!err.response) {
                 setError(err?.message || 'Cannot reach server. Please make sure backend is running on port 8080.');
                 return;
             }
-
             const baseMessage = getErrorMessage(err, 'Login failed. Please try again.');
             const low = baseMessage.toLowerCase();
-
             if (low.includes('email not confirmed')) {
                 setError('Please verify your email first, then try logging in again.');
             } else if (low.includes('invalid login credentials') || low.includes('invalid')) {
@@ -164,4 +150,5 @@ const Login = () => {
         </div>
     );
 };
+
 export default Login;

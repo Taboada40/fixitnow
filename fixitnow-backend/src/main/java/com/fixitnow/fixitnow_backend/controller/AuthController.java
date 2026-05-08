@@ -49,15 +49,42 @@ public class AuthController {
             if (request.getPassword() == null || request.getPassword().isBlank()) {
                 return ResponseEntity.badRequest().body(Map.of("message", "Password is required"));
             }
+
+            // Log registration attempt with names for debugging
+            System.out.println("[AuthController] Registration attempt for: " + request.getEmail() 
+                + " firstName=" + request.getFirstName() 
+                + " lastName=" + request.getLastName()
+                + " username=" + request.getUsername());
+
             ResponseEntity<Map<String, Object>> signUpResponse = userRepository.signUp(request);
+
             if (signUpResponse.getStatusCode().is2xxSuccessful()) {
-                profileService.upsertFromRegistration(request);
+                // Save profile to DB
+                UserProfile savedProfile = profileService.upsertFromRegistration(request);
+
+                System.out.println("[AuthController] Profile saved: id=" + savedProfile.getId() 
+                    + " firstName=" + savedProfile.getFirstName() 
+                    + " lastName=" + savedProfile.getLastName()
+                    + " email=" + savedProfile.getEmail());
+
+                // FIX: Sync first/last name to Supabase auth metadata immediately after registration
+                // so that on first login, the auth metadata already has the correct names.
+                try {
+                    userRepository.syncUserMetadataByEmail(savedProfile.getEmail(), buildAuthMetadata(savedProfile));
+                    System.out.println("[AuthController] Metadata synced successfully for: " + savedProfile.getEmail());
+                } catch (Exception metaEx) {
+                    // Non-fatal: profile is saved; metadata sync failure should not block registration
+                    System.err.println("[AuthController] Warning: metadata sync after registration failed for "
+                            + savedProfile.getEmail() + ": " + metaEx.getMessage());
+                }
+
                 return ResponseEntity.status(signUpResponse.getStatusCode()).body(Map.of(
                         "message", "Registration successful",
                         "data", signUpResponse.getBody()
                 ));
             }
             return signUpResponse;
+
         } catch (HttpClientErrorException e) {
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
@@ -80,6 +107,7 @@ public class AuthController {
             if (request.getPassword() == null || request.getPassword().isBlank()) {
                 return ResponseEntity.badRequest().body(Map.of("message", "Password is required"));
             }
+
             ResponseEntity<Map<String, Object>> signInResponse = userRepository.signIn(request);
             Map<String, Object> sessionBody = signInResponse.getBody();
             if (sessionBody == null) {
@@ -94,7 +122,7 @@ public class AuthController {
             }
 
             UserProfile profile = profileService.getByEmail(request.getEmail())
-                .orElseGet(() -> profileService.ensureStudentProfile(request.getEmail()));
+                    .orElseGet(() -> profileService.ensureStudentProfile(request.getEmail()));
 
             if (StringUtils.normalizeEmail(request.getEmail()).equals(StringUtils.normalizeEmail(configuredAdminEmail))) {
                 profile = profileService.ensureAdminProfile(
@@ -105,9 +133,18 @@ public class AuthController {
                 );
             }
 
+            // FIX: Sync latest profile data to auth metadata on every login
+            // This ensures auth metadata stays in sync with DB
+            try {
+                userRepository.syncUserMetadataByEmail(profile.getEmail(), buildAuthMetadata(profile));
+            } catch (Exception metaEx) {
+                System.err.println("[AuthController] Warning: metadata sync during login failed for "
+                        + profile.getEmail() + ": " + metaEx.getMessage());
+            }
+
             return ResponseEntity.ok(buildLoginResponse(sessionBody, profile));
+
         } catch (HttpClientErrorException e) {
-            // Pass through Supabase's real error body (e.g. "Email not confirmed", "Invalid login credentials")
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -176,6 +213,18 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("message", "Password update failed: " + e.getMessage()));
         }
+    }
+
+    private Map<String, Object> buildAuthMetadata(UserProfile profile) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("first_name", StringUtils.valueOrFallback(profile.getFirstName(), ""));
+        metadata.put("last_name", StringUtils.valueOrFallback(profile.getLastName(), ""));
+        metadata.put("username", StringUtils.valueOrFallback(profile.getUsername(), ""));
+        metadata.put("phone_number", StringUtils.valueOrFallback(profile.getPhoneNumber(), ""));
+        metadata.put("role", StringUtils.valueOrFallback(profile.getRole(), "STUDENT"));
+        // FIX: Include profile image URL in auth metadata
+        metadata.put("profile_image_url", StringUtils.valueOrFallback(profile.getProfileImageUrl(), ""));
+        return metadata;
     }
 
     private String valueAsText(Object value) {

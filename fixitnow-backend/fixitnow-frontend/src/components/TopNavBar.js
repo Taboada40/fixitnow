@@ -1,12 +1,8 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-    fetchLatestSessionProfile,
-    mergeSessionProfile,
     useSession,
-    clearSession,
-    resolveSessionProfileId,
-    resolveSessionProfileIdentifier
+    clearSession
 } from '../utils/profileSession';
 
 const HomeIcon = () => (
@@ -38,26 +34,24 @@ const ChevronDownIcon = () => (
 
 const TopNavBar = () => {
     const navigate = useNavigate();
+    const session = useSession();
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const dropdownRef = useRef(null);
-    const [isSyncingProfile, setIsSyncingProfile] = useState(true);
-    const lastSyncedKeyRef = useRef('');
 
-    const session = useSession();
+    // Read profile directly from session — no independent DB fetch here.
+    // Profile.js and Login.js are the sole owners of session writes.
     const profile = session?.profile || {};
-    const displayName = profile?.firstName && profile?.firstName.trim()
+    const displayName = profile?.firstName && profile.firstName.trim()
         ? `${profile.firstName} ${(profile.lastName || '').trim()}`.trim()
         : (profile?.username || profile?.email || '');
+    const profileImageSrc = profile?.profileImageUrl || null;
 
-    const profileImageSrc = profile?.profileImageUrl
-        || (profile?.profileImage ? `data:${profile.profileImageContentType || 'image/jpeg'};base64,${profile.profileImage}` : null);
-    const profileId = profile?.id || null;
-    const profileIdentifier = profile?.email || session?.session?.user?.email || '';
-    const profileSyncKey = `${String(profileId || '')}|${String(profileIdentifier || '')}`;
+    const metadataRole = session?.session?.user?.user_metadata?.role || '';
+    const role = (profile?.role || metadataRole || '').toUpperCase();
+    const notificationsPath = role === 'ADMIN' ? '/admin/notifications' : '/notifications';
+    const homePath = role === 'ADMIN' ? '/admin/dashboard' : '/dashboard';
 
-    const showProfileSkeleton = isSyncingProfile;
-
-    // Close dropdown when clicking outside
+    // Close dropdown on outside click
     useEffect(() => {
         const handleClickOutside = (e) => {
             if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
@@ -70,41 +64,6 @@ const TopNavBar = () => {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, [dropdownOpen]);
 
-    const persistAndPublishProfile = useCallback((latestProfile) => {
-        mergeSessionProfile(latestProfile);
-    }, []);
-
-    const syncProfileFromDatabase = useCallback(async () => {
-        const userId = profileId || resolveSessionProfileId();
-        const identifier = profileIdentifier || resolveSessionProfileIdentifier();
-        if (!userId && !identifier) {
-            setIsSyncingProfile(false);
-            return;
-        }
-
-        if (lastSyncedKeyRef.current === profileSyncKey) {
-            setIsSyncingProfile(false);
-            return;
-        }
-
-        setIsSyncingProfile(true);
-        try {
-            const latestProfile = await fetchLatestSessionProfile({ profileId: userId, identifier });
-            if (latestProfile?.id || latestProfile?.email) {
-                persistAndPublishProfile(latestProfile);
-            }
-        } catch (_) {
-            // keep existing session profile when refresh fails
-        } finally {
-            lastSyncedKeyRef.current = profileSyncKey;
-            setIsSyncingProfile(false);
-        }
-    }, [persistAndPublishProfile, profileId, profileIdentifier, profileSyncKey]);
-
-    useEffect(() => {
-        syncProfileFromDatabase();
-    }, [syncProfileFromDatabase]);
-
     const handleLogout = () => {
         clearSession();
         setDropdownOpen(false);
@@ -115,11 +74,6 @@ const TopNavBar = () => {
         setDropdownOpen(false);
         navigate(path);
     };
-
-    const metadataRole = session?.session?.user?.user_metadata?.role || '';
-    const role = (profile?.role || metadataRole || '').toUpperCase();
-    const notificationsPath = role === 'ADMIN' ? '/admin/notifications' : '/notifications';
-    const homePath = role === 'ADMIN' ? '/admin/dashboard' : '/dashboard';
 
     return (
         <nav className="top-navbar">
@@ -149,26 +103,20 @@ const TopNavBar = () => {
                 <div className="top-nav-dropdown" ref={dropdownRef}>
                     <button
                         className="top-nav-profile-btn"
-                        onClick={() => !showProfileSkeleton && setDropdownOpen(!dropdownOpen)}
-                        title={showProfileSkeleton ? 'Syncing profile...' : `Profile for ${displayName || 'User'}`}
+                        onClick={() => setDropdownOpen(prev => !prev)}
+                        title={`Profile for ${displayName || 'User'}`}
                         aria-label="Profile menu"
-                        disabled={showProfileSkeleton}
                     >
-                        {showProfileSkeleton ? (
-                            <>
-                                <span className="top-nav-avatar-skeleton" aria-hidden="true" />
-                                <span className="top-nav-name-skeleton" aria-hidden="true" />
-                            </>
-                        ) : profileImageSrc ? (
+                        {profileImageSrc ? (
                             <img src={profileImageSrc} alt="Profile" className="top-nav-avatar-img" />
                         ) : (
                             <UserIcon />
                         )}
-                        {!showProfileSkeleton && <span className="top-nav-profile-name">{displayName || 'User'}</span>}
-                        {!showProfileSkeleton && <ChevronDownIcon />}
+                        <span className="top-nav-profile-name">{displayName || 'User'}</span>
+                        <ChevronDownIcon />
                     </button>
 
-                    {dropdownOpen && !showProfileSkeleton && (
+                    {dropdownOpen && (
                         <div className="top-nav-dropdown-menu">
                             <button
                                 className="top-nav-dropdown-item"
