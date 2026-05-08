@@ -30,7 +30,8 @@ const Profile = () => {
     
     const storedProfile = session?.profile || {};
     const authSession = session?.session || session || {};
-    const role = useMemo(() => (storedProfile?.role || '').toUpperCase(), [storedProfile?.role]);
+    const metadataRole = authSession?.user?.user_metadata?.role || '';
+    const role = useMemo(() => (storedProfile?.role || metadataRole || '').toUpperCase(), [storedProfile?.role, metadataRole]);
     const authenticatedEmail = useMemo(() => authSession?.user?.email || storedProfile?.email || '', [authSession?.user?.email, storedProfile?.email]);
     const authenticatedUserId = useMemo(() => storedProfile?.id || null, [storedProfile?.id]);
 

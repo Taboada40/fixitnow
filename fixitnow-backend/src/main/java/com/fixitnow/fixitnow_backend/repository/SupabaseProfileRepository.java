@@ -17,7 +17,6 @@ import org.springframework.web.util.UriUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.net.http.HttpClient;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -394,51 +393,6 @@ public class SupabaseProfileRepository {
         body.put("phone_number", profile.getPhoneNumber());
         body.put("profile_picture_url", profile.getProfileImageUrl());
         return body;
-    }
-
-    private String toByteaLiteral(byte[] bytes) {
-        if (bytes == null || bytes.length == 0) {
-            return null;
-        }
-
-        StringBuilder builder = new StringBuilder("\\x");
-        for (byte b : bytes) {
-            builder.append(String.format("%02x", b));
-        }
-        return builder.toString();
-    }
-
-    private byte[] toBytes(Object value) {
-        if (value == null) {
-            return null;
-        }
-
-        if (value instanceof byte[] bytes) {
-            return bytes;
-        }
-
-        String text = value.toString();
-        if (text.isBlank()) {
-            return null;
-        }
-
-        String normalized = text.startsWith("\\x") ? text.substring(2)
-                : text.startsWith("0x") ? text.substring(2)
-                : null;
-
-        if (normalized != null && normalized.length() % 2 == 0 && normalized.matches("[0-9a-fA-F]+")) {
-            byte[] bytes = new byte[normalized.length() / 2];
-            for (int i = 0; i < normalized.length(); i += 2) {
-                bytes[i / 2] = (byte) Integer.parseInt(normalized.substring(i, i + 2), 16);
-            }
-            return bytes;
-        }
-
-        try {
-            return Base64.getDecoder().decode(text);
-        } catch (IllegalArgumentException ignored) {
-            return null;
-        }
     }
 
     private IllegalStateException mapClientError(String tableName, HttpClientErrorException e) {

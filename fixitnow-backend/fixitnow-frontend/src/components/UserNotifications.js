@@ -10,7 +10,8 @@ const UserNotifications = () => {
     const session = useSession();
     const profile = session?.profile || {};
     const userId = profile?.id || null;
-    const role = (profile?.role || 'STUDENT').toUpperCase();
+    const metadataRole = session?.session?.user?.user_metadata?.role || '';
+    const role = (profile?.role || metadataRole || 'STUDENT').toUpperCase();
 
     const [notifications, setNotifications] = useState([]);
     const [loading, setLoading] = useState(true);

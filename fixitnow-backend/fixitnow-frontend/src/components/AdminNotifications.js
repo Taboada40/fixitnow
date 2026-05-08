@@ -7,7 +7,8 @@ const AdminNotifications = () => {
     const navigate = useNavigate();
     const session = useSession();
     const profile = session?.profile || {};
-    const role = (profile?.role || 'STUDENT').toUpperCase();
+    const metadataRole = session?.session?.user?.user_metadata?.role || '';
+    const role = (profile?.role || metadataRole || 'STUDENT').toUpperCase();
     const adminUserId = profile?.id || null;
     const adminEmail = profile?.email || session?.session?.user?.email || '';
     const adminAccessParams = useMemo(

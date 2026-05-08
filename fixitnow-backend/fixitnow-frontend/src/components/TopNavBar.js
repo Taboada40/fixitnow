@@ -116,8 +116,10 @@ const TopNavBar = () => {
         navigate(path);
     };
 
-    const role = (profile?.role || '').toUpperCase();
+    const metadataRole = session?.session?.user?.user_metadata?.role || '';
+    const role = (profile?.role || metadataRole || '').toUpperCase();
     const notificationsPath = role === 'ADMIN' ? '/admin/notifications' : '/notifications';
+    const homePath = role === 'ADMIN' ? '/admin/dashboard' : '/dashboard';
 
     return (
         <nav className="top-navbar">
@@ -128,7 +130,7 @@ const TopNavBar = () => {
             <div className="top-navbar-right">
                 <button
                     className="top-nav-icon-btn"
-                    onClick={() => handleNavigate('/dashboard')}
+                    onClick={() => handleNavigate(homePath)}
                     title="Home"
                     aria-label="Go to dashboard"
                 >

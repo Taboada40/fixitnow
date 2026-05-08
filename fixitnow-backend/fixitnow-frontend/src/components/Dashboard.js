@@ -41,7 +41,8 @@ const Dashboard = () => {
     
     const storedProfile = session?.profile || {};
     const [freshProfile, setFreshProfile] = useState(storedProfile);
-    const role = useMemo(() => (freshProfile?.role || storedProfile?.role || 'STUDENT').toUpperCase(), [freshProfile?.role, storedProfile?.role]);
+    const metadataRole = session?.session?.user?.user_metadata?.role || '';
+    const role = useMemo(() => (freshProfile?.role || storedProfile?.role || metadataRole || '').toUpperCase(), [freshProfile?.role, storedProfile?.role, metadataRole]);
 
     const [filter, setFilter] = useState('All');
     const [search, setSearch] = useState('');
