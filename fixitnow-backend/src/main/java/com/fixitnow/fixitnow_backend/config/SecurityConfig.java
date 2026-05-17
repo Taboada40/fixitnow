@@ -34,10 +34,10 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .csrf(AbstractHttpConfigurer::disable)
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .addFilterBefore(new SupabaseBearerTokenAuthenticationFilter(userRepository), UsernamePasswordAuthenticationFilter.class)
-                .authorizeHttpRequests(auth -> auth
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .addFilterBefore(new SupabaseBearerTokenAuthenticationFilter(userRepository), UsernamePasswordAuthenticationFilter.class)
+            .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/profile/authenticated").permitAll()
@@ -45,9 +45,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/profile/**").authenticated()
                 .requestMatchers("/api/reports/**").authenticated()
                 .requestMatchers("/api/admin/**").authenticated()
-                .requestMatchers("/api/notifications/**").authenticated()
-                        .anyRequest().authenticated()
-                );
+                .anyRequest().authenticated()
+            );
 
         return http.build();
     }

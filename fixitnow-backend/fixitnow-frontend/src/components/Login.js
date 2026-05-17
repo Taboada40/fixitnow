@@ -45,7 +45,6 @@ const Login = () => {
                 }
             };
 
-            // Always fetch fresh profile from DB — don't trust login response alone
             const latestProfile = await fetchLatestSessionProfile({
                 profileId: loginProfile?.id,
                 identifier: loginProfile?.email || loginRes?.data?.session?.user?.email || identifier,
@@ -59,14 +58,12 @@ const Login = () => {
             const existingUser = loginRes.data?.session?.user || {};
             const existingMetadata = existingUser?.user_metadata || {};
 
-            // Use != null so empty string "" overwrites stale metadata values
             const nextUserMetadata = { ...existingMetadata };
             if (latestProfile.firstName != null) nextUserMetadata.first_name = latestProfile.firstName;
             if (latestProfile.lastName != null) nextUserMetadata.last_name = latestProfile.lastName;
             if (latestProfile.username != null) nextUserMetadata.username = latestProfile.username;
             if (latestProfile.phoneNumber != null) nextUserMetadata.phone_number = latestProfile.phoneNumber;
             if (latestProfile.role != null) nextUserMetadata.role = String(latestProfile.role).toUpperCase();
-            // FIX: Include profile image URL in metadata
             if (latestProfile.profileImageUrl != null) nextUserMetadata.profile_image_url = latestProfile.profileImageUrl;
 
             setSession({
@@ -88,7 +85,7 @@ const Login = () => {
         } catch (err) {
             console.error('Login Error:', err);
             if (!err.response) {
-                setError(err?.message || 'Cannot reach server. Please make sure backend is running on port 8080.');
+                setError('Cannot reach server. Please check your internet connection and ensure the backend is running.');
                 return;
             }
             const baseMessage = getErrorMessage(err, 'Login failed. Please try again.');

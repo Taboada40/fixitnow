@@ -9,9 +9,6 @@ const notifySessionListeners = () => {
     sessionListeners.forEach((listener) => listener());
 };
 
-// Always write keys when value is not null/undefined.
-// Previously a truthy check caused empty strings "" to be skipped,
-// letting stale Supabase auth metadata values survive after save.
 const mergeMetadata = (profile = {}, existingMetadata = {}) => {
     const merged = { ...existingMetadata };
     if (profile.firstName != null) merged.first_name = profile.firstName;
@@ -19,7 +16,6 @@ const mergeMetadata = (profile = {}, existingMetadata = {}) => {
     if (profile.username != null) merged.username = profile.username;
     if (profile.phoneNumber != null) merged.phone_number = profile.phoneNumber;
     if (profile.role != null) merged.role = String(profile.role).toUpperCase();
-    // FIX: Include profile image URL in metadata sync
     if (profile.profileImageUrl != null) merged.profile_image_url = profile.profileImageUrl;
     return merged;
 };

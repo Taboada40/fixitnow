@@ -45,13 +45,7 @@ const Register = () => {
                 email: normalizedEmail,
                 password: formData.password
             }, { auth: false });
-            try {
-                await apiPost('/api/profile/authenticated', {
-                    identifier: normalizedEmail
-                }, { auth: false });
-            } catch (profileErr) {
-                console.warn('Profile pre-sync skipped:', profileErr.message);
-            }
+
             alert('Account created successfully. You can now log in.');
             navigate('/login');
         } catch (err) {
@@ -157,4 +151,5 @@ const Register = () => {
         </div>
     );
 };
+
 export default Register;
