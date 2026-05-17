@@ -34,11 +34,15 @@ public class UserRepository {
 
     private final RestTemplate restTemplate = new RestTemplate(new JdkClientHttpRequestFactory(HttpClient.newHttpClient()));
 
+    /**
+     * Headers for PUBLIC auth endpoints (signup, login).
+     * Only sends apikey header. Do NOT send publishable key in Authorization
+     * because sb_publishable_... is not a JWT.
+     */
     private HttpHeaders createHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("apikey", supabaseKey);
-        headers.set("Authorization", "Bearer " + supabaseKey);
         return headers;
     }
 
@@ -84,7 +88,6 @@ public class UserRepository {
 
     public ResponseEntity<Map<String, Object>> signIn(UserRequest userRequest) {
         String url = supabaseUrl + "/auth/v1/token?grant_type=password";
-        // Send ONLY email + password — Supabase rejects extra/null fields
         Map<String, String> body = Map.of(
                 "email", userRequest.getEmail(),
                 "password", userRequest.getPassword()
