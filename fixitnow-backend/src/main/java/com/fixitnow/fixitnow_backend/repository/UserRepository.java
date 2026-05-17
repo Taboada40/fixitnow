@@ -36,14 +36,13 @@ public class UserRepository {
 
     /**
      * Headers for PUBLIC auth endpoints (signup, login).
-     * Only sends apikey header. Do NOT send publishable key in Authorization
-     * because sb_publishable_... is not a JWT.
+     * Only sends apikey header. Do NOT send anon key in Authorization
+     * for public endpoints — Supabase only needs apikey for identification.
      */
     private HttpHeaders createHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("apikey", supabaseKey);
-        headers.set("Authorization", "Bearer " + supabaseKey);
         return headers;
     }
 
