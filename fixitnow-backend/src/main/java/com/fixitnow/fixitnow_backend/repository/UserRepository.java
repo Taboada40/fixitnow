@@ -43,6 +43,7 @@ public class UserRepository {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("apikey", supabaseKey);
+        headers.set("Authorization", "Bearer " + supabaseKey);
         return headers;
     }
 
