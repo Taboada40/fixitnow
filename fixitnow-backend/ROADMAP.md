@@ -58,8 +58,6 @@ src/main/java/com/fixitnow/fixitnow_backend/
 Configuration classes for application setup and security:
 ```
 ├── config/
-│   ├── AdminBootstrapConfig.java                        # Admin user initialization
-│   ├── ProfileMigrationConfig.java                      # User profile migration setup
 │   ├── SecurityConfig.java                              # Spring Security configuration
 │   └── SupabaseBearerTokenAuthenticationFilter.java     # Supabase JWT token authentication filter
 ```

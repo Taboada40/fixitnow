@@ -7,8 +7,6 @@
   - **FixitnowBackendApplication.java** - Main Spring Boot application entry point
   
   - **config/** - Configuration classes
-    - `AdminBootstrapConfig.java` - Admin user initialization configuration
-    - `ProfileMigrationConfig.java` - User profile migration setup
     - `SecurityConfig.java` - Spring Security configuration
     - `SupabaseBearerTokenAuthenticationFilter.java` - Authentication filter for Supabase tokens
   
