@@ -99,7 +99,6 @@ public class SupabaseProfileRepository {
             return mapRow(rows.get(0));
         }
 
-        // If response body is empty, fetch the profile we just upserted
         return findByEmail(profile.getEmail()).orElse(profile);
     }
 
@@ -331,12 +330,15 @@ public class SupabaseProfileRepository {
         return rows.stream().map(this::mapRow).collect(Collectors.toList());
     }
 
+    /**
+     * FIX: Use service role key for all database operations.
+     * PostgREST requires service key for writes when RLS is enabled.
+     */
     private HttpHeaders createHeaders() {
-        String key = supabaseServiceKey == null || supabaseServiceKey.isBlank() ? supabaseKey : supabaseServiceKey;
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("apikey", key);
-        headers.set("Authorization", "Bearer " + key);
+        headers.set("apikey", supabaseServiceKey);
+        headers.set("Authorization", "Bearer " + supabaseServiceKey);
         return headers;
     }
 
@@ -353,10 +355,9 @@ public class SupabaseProfileRepository {
     }
 
     private HttpHeaders createStorageHeaders(String contentType) {
-        String key = supabaseServiceKey == null || supabaseServiceKey.isBlank() ? supabaseKey : supabaseServiceKey;
         HttpHeaders headers = new HttpHeaders();
-        headers.set("apikey", key);
-        headers.set("Authorization", "Bearer " + key);
+        headers.set("apikey", supabaseServiceKey);
+        headers.set("Authorization", "Bearer " + supabaseServiceKey);
         headers.setContentType(MediaType.parseMediaType(
                 contentType == null || contentType.isBlank() ? MediaType.APPLICATION_OCTET_STREAM_VALUE : contentType
         ));
@@ -391,11 +392,9 @@ public class SupabaseProfileRepository {
         body.put("first_name", profile.getFirstName());
         body.put("last_name", profile.getLastName());
         body.put("role", profile.getRole());
-        // FIX: Only include phone_number if it's not null to avoid overwriting with null
         if (profile.getPhoneNumber() != null) {
             body.put("phone_number", profile.getPhoneNumber());
         }
-        // FIX: Only include profile_picture_url if it's not null to avoid overwriting with null
         if (profile.getProfileImageUrl() != null) {
             body.put("profile_picture_url", profile.getProfileImageUrl());
         }
