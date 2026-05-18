@@ -1,6 +1,7 @@
 package com.fixitnow.fixitnow_backend.repository;
 import org.springframework.web.client.RestTemplate;
 
+import com.fixitnow.fixitnow_backend.exception.SupabaseRequestException;
 import com.fixitnow.fixitnow_backend.model.UserProfile;
 import com.fixitnow.fixitnow_backend.util.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
@@ -8,6 +9,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Repository;
@@ -261,7 +263,7 @@ public class SupabaseProfileRepository {
             );
         } catch (HttpStatusCodeException e) {
             String responseBody = e.getResponseBodyAsString();
-            if (e.getStatusCode().value() == 404 || responseBody.contains("PGRST205")) {
+            if (e.getStatusCode().value() == 404 || (responseBody != null && responseBody.contains("PGRST205"))) {
                 return Optional.empty();
             }
             throw mapClientError(table, e);
@@ -290,7 +292,7 @@ public class SupabaseProfileRepository {
             );
         } catch (HttpStatusCodeException e) {
             String responseBody = e.getResponseBodyAsString();
-            if (e.getStatusCode().value() == 404 || responseBody.contains("PGRST205")) {
+            if (e.getStatusCode().value() == 404 || (responseBody != null && responseBody.contains("PGRST205"))) {
                 return Optional.empty();
             }
             throw mapClientError(table, e);
@@ -318,7 +320,7 @@ public class SupabaseProfileRepository {
             );
         } catch (HttpStatusCodeException e) {
             String responseBody = e.getResponseBodyAsString();
-            if (e.getStatusCode().value() == 404 || responseBody.contains("PGRST205")) {
+            if (e.getStatusCode().value() == 404 || (responseBody != null && responseBody.contains("PGRST205"))) {
                 return List.of();
             }
             throw mapClientError(table, e);
@@ -405,11 +407,22 @@ public class SupabaseProfileRepository {
         return body;
     }
 
-    private IllegalStateException mapClientError(String tableName, HttpStatusCodeException e) {
+    private SupabaseRequestException mapClientError(String tableName, HttpStatusCodeException e) {
         String response = e.getResponseBodyAsString();
-        if (e.getStatusCode().value() == 404 || response.contains("PGRST205")) {
-            return new IllegalStateException("Supabase table '" + tableName + "' is missing. Run SUPABASE_SETUP.sql in Supabase SQL Editor.");
+        HttpStatus status = HttpStatus.resolve(e.getStatusCode().value());
+        if (status == HttpStatus.NOT_FOUND || (response != null && response.contains("PGRST205"))) {
+            return new SupabaseRequestException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Supabase table '" + tableName + "' is missing. Run SUPABASE_SETUP.sql in Supabase SQL Editor.",
+                    e
+            );
         }
-        return new IllegalStateException("Supabase request failed for table '" + tableName + "': " + response);
+        if (status == null) {
+            status = HttpStatus.INTERNAL_SERVER_ERROR;
+        }
+        String message = response == null || response.isBlank()
+                ? "Supabase request failed for table '" + tableName + "'."
+                : "Supabase request failed for table '" + tableName + "': " + response;
+        return new SupabaseRequestException(status, message, e);
     }
 }

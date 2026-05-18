@@ -1,5 +1,6 @@
 package com.fixitnow.fixitnow_backend.controller;
 
+import com.fixitnow.fixitnow_backend.exception.SupabaseRequestException;
 import com.fixitnow.fixitnow_backend.model.NotificationItem;
 import com.fixitnow.fixitnow_backend.model.ReportItem;
 import com.fixitnow.fixitnow_backend.model.ReportStatus;
@@ -103,6 +104,9 @@ public class AdminController {
             }
 
             return ResponseEntity.ok(updated);
+        } catch (SupabaseRequestException ex) {
+            return ResponseEntity.status(ex.getStatus())
+                    .body(Map.of("message", "Failed to update report status: " + ex.getMessage()));
         } catch (Exception ex) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("message", "Failed to update report status: " + ex.getMessage()));
@@ -146,6 +150,8 @@ public class AdminController {
                     .map(UserProfile::getRole)
                     .map(role -> role != null && role.equalsIgnoreCase("ADMIN"))
                     .orElse(false);
+        } catch (SupabaseRequestException ex) {
+            throw ex;
         } catch (RuntimeException ex) {
             return false;
         }

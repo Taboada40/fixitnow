@@ -1,5 +1,6 @@
 package com.fixitnow.fixitnow_backend.controller;
 
+import com.fixitnow.fixitnow_backend.exception.SupabaseRequestException;
 import com.fixitnow.fixitnow_backend.model.NotificationItem;
 import com.fixitnow.fixitnow_backend.service.NotificationService;
 import org.springframework.http.ResponseEntity;
@@ -31,6 +32,9 @@ public class NotificationController {
         try {
             List<NotificationItem> notifications = notificationService.listUserNotifications(userId);
             return ResponseEntity.ok(notifications);
+        } catch (SupabaseRequestException ex) {
+            return ResponseEntity.status(ex.getStatus())
+                    .body(Map.of("message", "Failed to load notifications: " + ex.getMessage()));
         } catch (RuntimeException ex) {
             return ResponseEntity.status(500).body(Map.of("message", "Failed to load notifications: " + ex.getMessage()));
         }

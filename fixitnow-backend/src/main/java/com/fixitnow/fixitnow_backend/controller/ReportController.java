@@ -1,5 +1,6 @@
 package com.fixitnow.fixitnow_backend.controller;
 
+import com.fixitnow.fixitnow_backend.exception.SupabaseRequestException;
 import com.fixitnow.fixitnow_backend.model.ReportItem;
 import com.fixitnow.fixitnow_backend.model.ReportRequest;
 import com.fixitnow.fixitnow_backend.model.ReportStatus;
@@ -38,6 +39,9 @@ public class ReportController {
         try {
             List<ReportItem> reports = reportService.listReports(userId);
             return ResponseEntity.ok(reports);
+        } catch (SupabaseRequestException ex) {
+            return ResponseEntity.status(ex.getStatus())
+                    .body(Map.of("message", "Failed to load reports: " + ex.getMessage()));
         } catch (RuntimeException ex) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("message", "Failed to load reports: " + ex.getMessage()));
@@ -52,11 +56,17 @@ public class ReportController {
         try {
             UserDashboardSummary summary = reportService.getUserDashboardSummary(userId);
             return ResponseEntity.ok(summary);
+        } catch (SupabaseRequestException ex) {
+            return ResponseEntity.status(ex.getStatus())
+                    .body(Map.of("message", "Failed to load report summary: " + ex.getMessage()));
         } catch (RuntimeException ex) {
             try {
                 // Fallback to in-memory aggregation when the DB summary view is unavailable.
                 UserDashboardSummary summary = buildSummaryFromReports(reportService.listReports(userId));
                 return ResponseEntity.ok(summary);
+            } catch (SupabaseRequestException innerEx) {
+                return ResponseEntity.status(innerEx.getStatus())
+                        .body(Map.of("message", "Failed to load report summary: " + innerEx.getMessage()));
             } catch (RuntimeException innerEx) {
                 return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                         .body(Map.of("message", "Failed to load report summary: " + innerEx.getMessage()));
@@ -87,6 +97,9 @@ public class ReportController {
             String message = ex.getMessage() == null ? "Invalid report payload" : ex.getMessage();
             int status = message.toLowerCase().contains("not found") ? HttpStatus.NOT_FOUND.value() : HttpStatus.BAD_REQUEST.value();
             return ResponseEntity.status(status).body(Map.of("message", message));
+        } catch (SupabaseRequestException ex) {
+            return ResponseEntity.status(ex.getStatus())
+                    .body(Map.of("message", "Failed to create report: " + ex.getMessage()));
         } catch (RuntimeException ex) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("message", "Failed to create report: " + ex.getMessage()));
@@ -104,6 +117,9 @@ public class ReportController {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Report not found"));
             }
             return ResponseEntity.ok(Map.of("message", "Deleted"));
+        } catch (SupabaseRequestException ex) {
+            return ResponseEntity.status(ex.getStatus())
+                    .body(Map.of("message", "Failed to delete report: " + ex.getMessage()));
         } catch (RuntimeException ex) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(Map.of("message", "Failed to delete report: " + ex.getMessage()));

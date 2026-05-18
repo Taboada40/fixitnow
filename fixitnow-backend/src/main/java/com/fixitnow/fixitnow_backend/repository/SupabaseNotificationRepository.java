@@ -1,11 +1,13 @@
 package com.fixitnow.fixitnow_backend.repository;
 
+import com.fixitnow.fixitnow_backend.exception.SupabaseRequestException;
 import com.fixitnow.fixitnow_backend.model.NotificationItem;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Repository;
@@ -63,7 +65,7 @@ public class SupabaseNotificationRepository {
             );
         } catch (HttpStatusCodeException e) {
             String responseBody = e.getResponseBodyAsString();
-            if (body.get("recipient_user_id") != null && responseBody.contains("recipient_user_id")) {
+            if (body.get("recipient_user_id") != null && responseBody != null && responseBody.contains("recipient_user_id")) {
                 body.remove("recipient_user_id");
                 HttpEntity<Map<String, Object>> fallbackEntity = new HttpEntity<>(body, createInsertHeaders());
                 try {
@@ -108,7 +110,7 @@ public class SupabaseNotificationRepository {
             );
         } catch (HttpStatusCodeException e) {
             String responseBody = e.getResponseBodyAsString();
-            if (responseBody.contains("recipient_user_id")) {
+            if (responseBody != null && responseBody.contains("recipient_user_id")) {
                 return List.of();
             }
             throw mapClientError("notifications", e);
@@ -175,11 +177,22 @@ public class SupabaseNotificationRepository {
         return item;
     }
 
-    private IllegalStateException mapClientError(String tableName, HttpStatusCodeException e) {
+    private SupabaseRequestException mapClientError(String tableName, HttpStatusCodeException e) {
         String response = e.getResponseBodyAsString();
-        if (e.getStatusCode().value() == 404 || response.contains("PGRST205")) {
-            return new IllegalStateException("Supabase table '" + tableName + "' is missing. Run SUPABASE_SETUP.sql in Supabase SQL Editor.");
+        HttpStatus status = HttpStatus.resolve(e.getStatusCode().value());
+        if (status == HttpStatus.NOT_FOUND || (response != null && response.contains("PGRST205"))) {
+            return new SupabaseRequestException(
+                    HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Supabase table '" + tableName + "' is missing. Run SUPABASE_SETUP.sql in Supabase SQL Editor.",
+                    e
+            );
         }
-        return new IllegalStateException("Supabase request failed for table '" + tableName + "': " + response);
+        if (status == null) {
+            status = HttpStatus.INTERNAL_SERVER_ERROR;
+        }
+        String message = response == null || response.isBlank()
+                ? "Supabase request failed for table '" + tableName + "'."
+                : "Supabase request failed for table '" + tableName + "': " + response;
+        return new SupabaseRequestException(status, message, e);
     }
 }
