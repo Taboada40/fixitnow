@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getErrorMessage } from '../utils/constants';
-import { apiGet, useSession } from '../utils/profileSession';
+import { apiGet, resolveSessionProfileId, useSession } from '../utils/profileSession';
 
 const AdminNotifications = () => {
     const navigate = useNavigate();
@@ -9,7 +9,7 @@ const AdminNotifications = () => {
     const profile = session?.profile || {};
     const metadataRole = session?.session?.user?.user_metadata?.role || '';
     const role = (profile?.role || metadataRole || 'STUDENT').toUpperCase();
-    const adminUserId = profile?.id || null;
+    const adminUserId = profile?.id || resolveSessionProfileId();
     const adminEmail = profile?.email || session?.session?.user?.email || '';
     const adminAccessParams = useMemo(
         () => (adminUserId ? { adminUserId } : { adminEmail }),

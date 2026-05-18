@@ -150,21 +150,25 @@ public class ProfileController {
         String raw = value.trim().toLowerCase(Locale.ROOT);
         String normalizedEmail = StringUtils.normalizeEmail(raw);
 
-        // First try direct email lookup
-        Optional<UserProfile> byEmail = profileService.getByEmail(normalizedEmail);
-        if (byEmail.isPresent()) {
+        try {
+            // First try direct email lookup
+            Optional<UserProfile> byEmail = profileService.getByEmail(normalizedEmail);
+            if (byEmail.isPresent()) {
+                return normalizedEmail;
+            }
+
+            // If not found and contains @, try username lookup
+            String loginId = raw.contains("@") ? raw.substring(0, raw.indexOf('@')) : raw;
+            return profileService.listAllProfiles().stream()
+                    .filter(profile -> profile.getUsername() != null && profile.getUsername().trim().equalsIgnoreCase(loginId))
+                    .map(UserProfile::getEmail)
+                    .filter(email -> email != null && !email.isBlank())
+                    .map(StringUtils::normalizeEmail)
+                    .findFirst()
+                    .orElse(normalizedEmail);
+        } catch (RuntimeException ex) {
             return normalizedEmail;
         }
-
-        // If not found and contains @, try username lookup
-        String loginId = raw.contains("@") ? raw.substring(0, raw.indexOf('@')) : raw;
-        return profileService.listAllProfiles().stream()
-                .filter(profile -> profile.getUsername() != null && profile.getUsername().trim().equalsIgnoreCase(loginId))
-                .map(UserProfile::getEmail)
-                .filter(email -> email != null && !email.isBlank())
-                .map(StringUtils::normalizeEmail)
-                .findFirst()
-                .orElse(normalizedEmail);
     }
 
     private boolean isAllowedImage(MultipartFile file) {

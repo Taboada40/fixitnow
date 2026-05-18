@@ -11,13 +11,11 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Repository;
-import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
-import java.net.http.HttpClient;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,9 +38,11 @@ public class SupabaseReportRepository {
     @Value("${supabase.service-key:}")
     private String supabaseServiceKey;
 
-    private final RestTemplate restTemplate = new RestTemplate(
-            new JdkClientHttpRequestFactory(HttpClient.newHttpClient())
-    );
+    private final RestTemplate restTemplate;
+
+    public SupabaseReportRepository(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
 
     public List<ReportItem> listByUserId(Long userId) {
         if (userId == null) {
@@ -62,7 +62,7 @@ public class SupabaseReportRepository {
                 entity,
                 new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             throw mapClientError("report_items", e);
         }
 
@@ -86,7 +86,7 @@ public class SupabaseReportRepository {
                     entity,
                     new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             throw mapClientError("report_items", e);
         }
 
@@ -119,7 +119,7 @@ public class SupabaseReportRepository {
                 entity,
                 new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             throw mapClientError("report_items", e);
         }
 
@@ -149,7 +149,7 @@ public class SupabaseReportRepository {
                     entity,
                     new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             throw mapClientError("report_items", e);
         }
 
@@ -172,7 +172,7 @@ public class SupabaseReportRepository {
                     entity,
                     new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             throw mapClientError("report_items", e);
         }
 
@@ -204,7 +204,7 @@ public class SupabaseReportRepository {
             if (rows != null && !rows.isEmpty()) {
                 return mapSummaryRow(rows.get(0), userId);
             }
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             String response = e.getResponseBodyAsString();
             if (!(e.getStatusCode().value() == 404 || response.contains("PGRST205"))) {
                 throw mapClientError("user_dashboard_summary", e);
@@ -292,7 +292,7 @@ public class SupabaseReportRepository {
         return value.trim();
     }
 
-    private IllegalStateException mapClientError(String tableName, HttpClientErrorException e) {
+    private IllegalStateException mapClientError(String tableName, HttpStatusCodeException e) {
         String response = e.getResponseBodyAsString();
         if (e.getStatusCode().value() == 404 || response.contains("PGRST205")) {
             return new IllegalStateException("Supabase table '" + tableName + "' is missing. Run SUPABASE_SETUP.sql in Supabase SQL Editor.");

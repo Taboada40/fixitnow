@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpStatusCodeException;
 
 import com.fixitnow.fixitnow_backend.model.PasswordChangeRequest;
 import com.fixitnow.fixitnow_backend.model.UserProfile;
@@ -50,42 +50,31 @@ public class AuthController {
                 return ResponseEntity.badRequest().body(Map.of("message", "Password is required"));
             }
 
-            // Log registration attempt with names for debugging
-            System.out.println("[AuthController] Registration attempt for: " + request.getEmail() 
-                + " firstName=" + request.getFirstName() 
-                + " lastName=" + request.getLastName()
-                + " username=" + request.getUsername());
-
             ResponseEntity<Map<String, Object>> signUpResponse = userRepository.signUp(request);
 
             if (signUpResponse.getStatusCode().is2xxSuccessful()) {
-                // Save profile to DB
-                UserProfile savedProfile = profileService.upsertFromRegistration(request);
-
-                System.out.println("[AuthController] Profile saved: id=" + savedProfile.getId() 
-                    + " firstName=" + savedProfile.getFirstName() 
-                    + " lastName=" + savedProfile.getLastName()
-                    + " email=" + savedProfile.getEmail());
-
-                // FIX: Sync first/last name to Supabase auth metadata immediately after registration
-                // so that on first login, the auth metadata already has the correct names.
+                UserProfile savedProfile;
                 try {
-                    userRepository.syncUserMetadataByEmail(savedProfile.getEmail(), buildAuthMetadata(savedProfile));
-                    System.out.println("[AuthController] Metadata synced successfully for: " + savedProfile.getEmail());
-                } catch (Exception metaEx) {
-                    // Non-fatal: profile is saved; metadata sync failure should not block registration
-                    System.err.println("[AuthController] Warning: metadata sync after registration failed for "
-                            + savedProfile.getEmail() + ": " + metaEx.getMessage());
+                    savedProfile = profileService.upsertFromRegistration(request);
+                } catch (Exception profileEx) {
+                    savedProfile = buildFallbackProfile(request.getEmail(), request.getUsername(), request.getFirstName(), request.getLastName(), "STUDENT");
                 }
 
-                return ResponseEntity.status(signUpResponse.getStatusCode()).body(Map.of(
-                        "message", "Registration successful",
-                        "data", signUpResponse.getBody()
-                ));
+                try {
+                    userRepository.syncUserMetadataByEmail(savedProfile.getEmail(), buildAuthMetadata(savedProfile));
+                } catch (Exception metaEx) {
+                    // Non-fatal: profile is saved; metadata sync failure should not block registration
+                }
+
+                Map<String, Object> responseBody = new LinkedHashMap<>();
+                responseBody.put("message", "Registration successful");
+                responseBody.put("data", signUpResponse.getBody());
+                responseBody.put("profile", savedProfile);
+                return ResponseEntity.status(signUpResponse.getStatusCode()).body(responseBody);
             }
             return signUpResponse;
 
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -121,30 +110,36 @@ public class AuthController {
                         .body(Map.of("message", "Login succeeded but no access token was returned"));
             }
 
-            UserProfile profile = profileService.getByEmail(request.getEmail())
-                    .orElseGet(() -> profileService.ensureStudentProfile(request.getEmail()));
-
-            if (StringUtils.normalizeEmail(request.getEmail()).equals(StringUtils.normalizeEmail(configuredAdminEmail))) {
-                profile = profileService.ensureAdminProfile(
-                        StringUtils.normalizeEmail(request.getEmail()),
-                        "admin",
-                        "Admin",
-                        "User"
-                );
+            UserProfile profile;
+            try {
+                profile = profileService.getByEmail(request.getEmail())
+                        .orElseGet(() -> profileService.ensureStudentProfile(request.getEmail()));
+            } catch (Exception profileEx) {
+                profile = buildFallbackProfile(request.getEmail(), null, null, null, "STUDENT");
             }
 
-            // FIX: Sync latest profile data to auth metadata on every login
-            // This ensures auth metadata stays in sync with DB
+            if (StringUtils.normalizeEmail(request.getEmail()).equals(StringUtils.normalizeEmail(configuredAdminEmail))) {
+                try {
+                    profile = profileService.ensureAdminProfile(
+                            StringUtils.normalizeEmail(request.getEmail()),
+                            "admin",
+                            "Admin",
+                            "User"
+                    );
+                } catch (Exception adminProfileEx) {
+                    profile = buildFallbackProfile(request.getEmail(), "admin", "Admin", "User", "ADMIN");
+                }
+            }
+
             try {
                 userRepository.syncUserMetadataByEmail(profile.getEmail(), buildAuthMetadata(profile));
             } catch (Exception metaEx) {
-                System.err.println("[AuthController] Warning: metadata sync during login failed for "
-                        + profile.getEmail() + ": " + metaEx.getMessage());
+                // Non-blocking: continue login even if metadata sync fails
             }
 
             return ResponseEntity.ok(buildLoginResponse(sessionBody, profile));
 
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -207,7 +202,7 @@ public class AuthController {
                     "message", "Password updated successfully",
                     "email", identifier
             ));
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             return ResponseEntity.status(e.getStatusCode()).body(e.getResponseBodyAsString());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -225,6 +220,27 @@ public class AuthController {
         // FIX: Include profile image URL in auth metadata
         metadata.put("profile_image_url", StringUtils.valueOrFallback(profile.getProfileImageUrl(), ""));
         return metadata;
+    }
+
+    private UserProfile buildFallbackProfile(String email, String username, String firstName, String lastName, String role) {
+        UserProfile profile = new UserProfile();
+        String normalizedEmail = StringUtils.normalizeEmail(email);
+        String fallbackUsername = username;
+
+        if (fallbackUsername == null || fallbackUsername.isBlank()) {
+            if (normalizedEmail != null && normalizedEmail.contains("@")) {
+                fallbackUsername = normalizedEmail.substring(0, normalizedEmail.indexOf('@'));
+            } else {
+                fallbackUsername = normalizedEmail;
+            }
+        }
+
+        profile.setEmail(normalizedEmail);
+        profile.setUsername(StringUtils.valueOrFallback(fallbackUsername, normalizedEmail));
+        profile.setFirstName(StringUtils.valueOrFallback(firstName, ""));
+        profile.setLastName(StringUtils.valueOrFallback(lastName, ""));
+        profile.setRole(StringUtils.valueOrFallback(role, "STUDENT").toUpperCase());
+        return profile;
     }
 
     private String valueAsText(Object value) {

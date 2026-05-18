@@ -130,7 +130,8 @@ export const mergeSessionProfile = (profile) => {
     });
 };
 
-export const resolveSessionProfileId = () => sessionState?.profile?.id || null;
+export const resolveSessionProfileId = () =>
+    sessionState?.profile?.id || sessionState?.session?.user?.id || null;
 
 export const resolveSessionProfileIdentifier = () =>
     sessionState?.profile?.email || sessionState?.session?.user?.email || null;

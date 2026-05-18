@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getErrorMessage } from '../utils/constants';
-import { apiDelete, apiGet, useSession } from '../utils/profileSession';
+import { apiDelete, apiGet, resolveSessionProfileId, useSession } from '../utils/profileSession';
 
 const ReportHistory = () => {
     const navigate = useNavigate();
@@ -9,7 +9,7 @@ const ReportHistory = () => {
     const profile = session?.profile || {};
     const metadataRole = session?.session?.user?.user_metadata?.role || '';
     const role = (profile?.role || metadataRole || 'STUDENT').toUpperCase();
-    const userId = profile?.id;
+    const userId = profile?.id || resolveSessionProfileId();
 
     const [reports, setReports] = useState([]);
     const [loading, setLoading] = useState(true);

@@ -94,7 +94,11 @@ public class ProfileService {
 
         Long userId = requirePersistableId(profile, "profile update");
         UserProfile persisted = profileRepository.updateById(userId, profile);
-        userRepository.syncUserMetadataByEmail(persisted.getEmail(), buildAuthMetadata(persisted));
+        try {
+            userRepository.syncUserMetadataByEmail(persisted.getEmail(), buildAuthMetadata(persisted));
+        } catch (Exception metaEx) {
+            // Non-fatal: profile data is already persisted.
+        }
         return persisted;
     }
 
@@ -153,8 +157,12 @@ public class ProfileService {
         Long profileUserId = requirePersistableId(profile, "profile picture update");
         UserProfile persisted = profileRepository.updateById(profileUserId, profile);
 
-        // FIX: Sync metadata including the new image URL
-        userRepository.syncUserMetadataByEmail(persisted.getEmail(), buildAuthMetadata(persisted));
+        // Sync metadata including the new image URL, but do not fail the profile save if Supabase auth metadata cannot be updated.
+        try {
+            userRepository.syncUserMetadataByEmail(persisted.getEmail(), buildAuthMetadata(persisted));
+        } catch (Exception metaEx) {
+            // Non-fatal: profile data and storage upload already succeeded.
+        }
 
         return persisted;
     }

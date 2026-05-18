@@ -1,4 +1,5 @@
 package com.fixitnow.fixitnow_backend.repository;
+import org.springframework.web.client.RestTemplate;
 
 import com.fixitnow.fixitnow_backend.model.UserProfile;
 import com.fixitnow.fixitnow_backend.util.StringUtils;
@@ -9,14 +10,11 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Repository;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.util.UriUtils;
 
 import java.nio.charset.StandardCharsets;
-import java.net.http.HttpClient;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -44,7 +42,11 @@ public class SupabaseProfileRepository {
     @Value("${supabase.storage.profile-bucket:profiles}")
     private String profileBucket;
 
-    private final RestTemplate restTemplate = new RestTemplate(new JdkClientHttpRequestFactory(HttpClient.newHttpClient()));
+    private final RestTemplate restTemplate;
+
+    public SupabaseProfileRepository(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
 
     public Optional<UserProfile> findById(Long id) {
         if (id == null) {
@@ -90,7 +92,7 @@ public class SupabaseProfileRepository {
                 entity,
                 new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             throw mapClientError("user_profiles", e);
         }
 
@@ -118,7 +120,7 @@ public class SupabaseProfileRepository {
                     entity,
                     new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             throw mapClientError("user_profiles", e);
         }
 
@@ -150,7 +152,7 @@ public class SupabaseProfileRepository {
                     entity,
                     new ParameterizedTypeReference<Map<String, Object>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             throw new IllegalStateException("Supabase storage upload failed: " + e.getResponseBodyAsString());
         }
     }
@@ -170,7 +172,7 @@ public class SupabaseProfileRepository {
                     entity,
                     new ParameterizedTypeReference<Map<String, Object>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             if (e.getStatusCode().value() != 404) {
                 throw new IllegalStateException("Supabase storage delete failed: " + e.getResponseBodyAsString());
             }
@@ -257,7 +259,7 @@ public class SupabaseProfileRepository {
                     entity,
                     new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             String responseBody = e.getResponseBodyAsString();
             if (e.getStatusCode().value() == 404 || responseBody.contains("PGRST205")) {
                 return Optional.empty();
@@ -286,7 +288,7 @@ public class SupabaseProfileRepository {
                     entity,
                     new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             String responseBody = e.getResponseBodyAsString();
             if (e.getStatusCode().value() == 404 || responseBody.contains("PGRST205")) {
                 return Optional.empty();
@@ -314,7 +316,7 @@ public class SupabaseProfileRepository {
                     entity,
                     new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             String responseBody = e.getResponseBodyAsString();
             if (e.getStatusCode().value() == 404 || responseBody.contains("PGRST205")) {
                 return List.of();
@@ -331,14 +333,15 @@ public class SupabaseProfileRepository {
     }
 
     /**
-     * FIX: Use service role key for all database operations.
-     * PostgREST requires service key for writes when RLS is enabled.
+     * Use service role key for database operations if available (for RLS-enabled tables),
+     * otherwise fall back to anon key for standard REST API operations.
      */
     private HttpHeaders createHeaders() {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("apikey", supabaseServiceKey);
-        headers.set("Authorization", "Bearer " + supabaseServiceKey);
+        String apiKey = (supabaseServiceKey != null && !supabaseServiceKey.isBlank()) ? supabaseServiceKey : supabaseKey;
+        headers.set("apikey", apiKey);
+        headers.set("Authorization", "Bearer " + apiKey);
         return headers;
     }
 
@@ -356,8 +359,9 @@ public class SupabaseProfileRepository {
 
     private HttpHeaders createStorageHeaders(String contentType) {
         HttpHeaders headers = new HttpHeaders();
-        headers.set("apikey", supabaseServiceKey);
-        headers.set("Authorization", "Bearer " + supabaseServiceKey);
+        String apiKey = (supabaseServiceKey != null && !supabaseServiceKey.isBlank()) ? supabaseServiceKey : supabaseKey;
+        headers.set("apikey", apiKey);
+        headers.set("Authorization", "Bearer " + apiKey);
         headers.setContentType(MediaType.parseMediaType(
                 contentType == null || contentType.isBlank() ? MediaType.APPLICATION_OCTET_STREAM_VALUE : contentType
         ));
@@ -401,7 +405,7 @@ public class SupabaseProfileRepository {
         return body;
     }
 
-    private IllegalStateException mapClientError(String tableName, HttpClientErrorException e) {
+    private IllegalStateException mapClientError(String tableName, HttpStatusCodeException e) {
         String response = e.getResponseBodyAsString();
         if (e.getStatusCode().value() == 404 || response.contains("PGRST205")) {
             return new IllegalStateException("Supabase table '" + tableName + "' is missing. Run SUPABASE_SETUP.sql in Supabase SQL Editor.");

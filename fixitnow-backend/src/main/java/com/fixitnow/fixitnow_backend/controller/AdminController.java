@@ -123,27 +123,31 @@ public class AdminController {
     }
 
     private boolean isAdmin(Long userId, String email) {
-        if (userId != null) {
-            return profileService.getById(userId)
+        try {
+            if (userId != null) {
+                return profileService.getById(userId)
+                        .map(UserProfile::getRole)
+                        .map(role -> role != null && role.equalsIgnoreCase("ADMIN"))
+                        .orElse(false);
+            }
+
+            String normalizedEmail = StringUtils.normalizeEmail(email);
+            if (normalizedEmail.isBlank()) {
+                return false;
+            }
+
+            if (!StringUtils.normalizeEmail(configuredAdminEmail).isBlank()
+                    && normalizedEmail.equals(StringUtils.normalizeEmail(configuredAdminEmail))) {
+                profileService.ensureAdminProfile(normalizedEmail, "admin", "Admin", "User");
+                return true;
+            }
+
+            return profileService.getByEmail(normalizedEmail)
                     .map(UserProfile::getRole)
                     .map(role -> role != null && role.equalsIgnoreCase("ADMIN"))
                     .orElse(false);
-        }
-
-        String normalizedEmail = StringUtils.normalizeEmail(email);
-        if (normalizedEmail.isBlank()) {
+        } catch (RuntimeException ex) {
             return false;
         }
-
-        if (!StringUtils.normalizeEmail(configuredAdminEmail).isBlank()
-                && normalizedEmail.equals(StringUtils.normalizeEmail(configuredAdminEmail))) {
-            profileService.ensureAdminProfile(normalizedEmail, "admin", "Admin", "User");
-            return true;
-        }
-
-        return profileService.getByEmail(normalizedEmail)
-                .map(UserProfile::getRole)
-                .map(role -> role != null && role.equalsIgnoreCase("ADMIN"))
-                .orElse(false);
     }
 }

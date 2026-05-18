@@ -28,8 +28,11 @@ public class NotificationController {
         if (userId == null) {
             return ResponseEntity.badRequest().body(Map.of("message", "User ID is required"));
         }
-
-        List<NotificationItem> notifications = notificationService.listUserNotifications(userId);
-        return ResponseEntity.ok(notifications);
+        try {
+            List<NotificationItem> notifications = notificationService.listUserNotifications(userId);
+            return ResponseEntity.ok(notifications);
+        } catch (RuntimeException ex) {
+            return ResponseEntity.status(500).body(Map.of("message", "Failed to load notifications: " + ex.getMessage()));
+        }
     }
 }

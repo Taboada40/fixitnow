@@ -35,8 +35,13 @@ public class ReportController {
         if (userId == null) {
             return ResponseEntity.badRequest().body(Map.of("message", "User ID is required"));
         }
-        List<ReportItem> reports = reportService.listReports(userId);
-        return ResponseEntity.ok(reports);
+        try {
+            List<ReportItem> reports = reportService.listReports(userId);
+            return ResponseEntity.ok(reports);
+        } catch (RuntimeException ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to load reports: " + ex.getMessage()));
+        }
     }
 
     @GetMapping("/summary")
@@ -44,14 +49,19 @@ public class ReportController {
         if (userId == null) {
             return ResponseEntity.badRequest().body(Map.of("message", "User ID is required"));
         }
-        UserDashboardSummary summary;
         try {
-            summary = reportService.getUserDashboardSummary(userId);
+            UserDashboardSummary summary = reportService.getUserDashboardSummary(userId);
+            return ResponseEntity.ok(summary);
         } catch (RuntimeException ex) {
-            // Fallback to in-memory aggregation when the DB summary view is unavailable.
-            summary = buildSummaryFromReports(reportService.listReports(userId));
+            try {
+                // Fallback to in-memory aggregation when the DB summary view is unavailable.
+                UserDashboardSummary summary = buildSummaryFromReports(reportService.listReports(userId));
+                return ResponseEntity.ok(summary);
+            } catch (RuntimeException innerEx) {
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(Map.of("message", "Failed to load report summary: " + innerEx.getMessage()));
+            }
         }
-        return ResponseEntity.ok(summary);
     }
 
     @PostMapping
@@ -70,8 +80,17 @@ public class ReportController {
         if (request.getLocation() == null || request.getLocation().isBlank()) {
             return ResponseEntity.badRequest().body(Map.of("message", "Location is required"));
         }
-        ReportItem saved = reportService.createReport(request);
-        return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+        try {
+            ReportItem saved = reportService.createReport(request);
+            return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+        } catch (IllegalArgumentException ex) {
+            String message = ex.getMessage() == null ? "Invalid report payload" : ex.getMessage();
+            int status = message.toLowerCase().contains("not found") ? HttpStatus.NOT_FOUND.value() : HttpStatus.BAD_REQUEST.value();
+            return ResponseEntity.status(status).body(Map.of("message", message));
+        } catch (RuntimeException ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to create report: " + ex.getMessage()));
+        }
     }
 
     @DeleteMapping("/{id}")
@@ -79,11 +98,16 @@ public class ReportController {
         if (userId == null) {
             return ResponseEntity.badRequest().body(Map.of("message", "User ID is required"));
         }
-        boolean deleted = reportService.deleteReport(id, userId);
-        if (!deleted) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Report not found"));
+        try {
+            boolean deleted = reportService.deleteReport(id, userId);
+            if (!deleted) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Report not found"));
+            }
+            return ResponseEntity.ok(Map.of("message", "Deleted"));
+        } catch (RuntimeException ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to delete report: " + ex.getMessage()));
         }
-        return ResponseEntity.ok(Map.of("message", "Deleted"));
     }
 
     private UserDashboardSummary buildSummaryFromReports(List<ReportItem> reports) {

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getErrorMessage } from '../utils/constants';
-import { apiGet, useSession } from '../utils/profileSession';
+import { apiGet, resolveSessionProfileId, useSession } from '../utils/profileSession';
 
 const POLL_INTERVAL_MS = 8000;
 
@@ -9,7 +9,7 @@ const UserNotifications = () => {
     const navigate = useNavigate();
     const session = useSession();
     const profile = session?.profile || {};
-    const userId = profile?.id || null;
+    const userId = profile?.id || resolveSessionProfileId();
     const metadataRole = session?.session?.user?.user_metadata?.role || '';
     const role = (profile?.role || metadataRole || 'STUDENT').toUpperCase();
 

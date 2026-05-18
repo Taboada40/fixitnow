@@ -4,7 +4,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.net.http.HttpClient;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
@@ -13,7 +12,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.client.RestTemplate;
 
@@ -32,12 +30,16 @@ public class UserRepository {
     @Value("${supabase.service-key:}")
     private String supabaseServiceKey;
 
-    private final RestTemplate restTemplate = new RestTemplate(new JdkClientHttpRequestFactory(HttpClient.newHttpClient()));
+    private final RestTemplate restTemplate;
+
+    public UserRepository(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
 
     /**
      * Headers for PUBLIC auth endpoints (signup, login).
-     * Only sends apikey header. Do NOT send anon key in Authorization
-     * for public endpoints — Supabase only needs apikey for identification.
+     * Only apikey header is required for public endpoints.
+     * Do NOT send Authorization header for public auth endpoints.
      */
     private HttpHeaders createHeaders() {
         HttpHeaders headers = new HttpHeaders();

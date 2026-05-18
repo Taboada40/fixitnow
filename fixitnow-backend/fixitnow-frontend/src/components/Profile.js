@@ -5,6 +5,7 @@ import {
     apiPut,
     fetchLatestSessionProfile,
     mergeSessionProfile as persistProfileSession,
+    resolveSessionProfileId,
     useSession,
     resolveSessionProfileIdentifier
 } from '../utils/profileSession';
@@ -32,7 +33,7 @@ const Profile = () => {
     const metadataRole = authSession?.user?.user_metadata?.role || '';
     const role = useMemo(() => (storedProfile?.role || metadataRole || '').toUpperCase(), [storedProfile?.role, metadataRole]);
     const authenticatedEmail = useMemo(() => authSession?.user?.email || storedProfile?.email || '', [authSession?.user?.email, storedProfile?.email]);
-    const authenticatedUserId = useMemo(() => storedProfile?.id || null, [storedProfile?.id]);
+    const authenticatedUserId = storedProfile?.id || authSession?.user?.id || resolveSessionProfileId() || null;
 
     const [formData, setFormData] = useState({
         firstName: '',

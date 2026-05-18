@@ -45,17 +45,30 @@ const Login = () => {
                 }
             };
 
-            const latestProfile = await fetchLatestSessionProfile({
-                profileId: loginProfile?.id,
-                identifier: loginProfile?.email || loginRes?.data?.session?.user?.email || identifier,
-                sessionSnapshot
-            });
-
-            if (!latestProfile?.email && !latestProfile?.id) {
-                throw new Error('Unable to load latest profile data.');
+            let latestProfile = loginProfile;
+            try {
+                const fetchedProfile = await fetchLatestSessionProfile({
+                    profileId: loginProfile?.id,
+                    identifier: loginProfile?.email || loginRes?.data?.session?.user?.email || identifier,
+                    sessionSnapshot
+                });
+                if (fetchedProfile?.email || fetchedProfile?.id) {
+                    latestProfile = fetchedProfile;
+                }
+            } catch (profileError) {
+                if (!latestProfile?.email && !latestProfile?.id) {
+                    latestProfile = {
+                        email: loginRes?.data?.session?.user?.email || identifier,
+                        username: loginRes?.data?.profile?.username || identifier.split('@')[0] || '',
+                        firstName: loginRes?.data?.profile?.firstName || '',
+                        lastName: loginRes?.data?.profile?.lastName || '',
+                        role: loginRes?.data?.profile?.role || loginRes?.data?.session?.user?.user_metadata?.role || 'STUDENT'
+                    };
+                }
             }
 
             const existingUser = loginRes.data?.session?.user || {};
+            const resolvedUserId = latestProfile?.id || existingUser?.id || loginRes?.data?.session?.user?.id || null;
             const existingMetadata = existingUser?.user_metadata || {};
 
             const nextUserMetadata = { ...existingMetadata };
@@ -68,7 +81,10 @@ const Login = () => {
 
             setSession({
                 ...sessionSnapshot,
-                profile: latestProfile,
+                profile: {
+                    ...latestProfile,
+                    id: resolvedUserId
+                },
                 session: {
                     ...(sessionSnapshot.session || {}),
                     user: {

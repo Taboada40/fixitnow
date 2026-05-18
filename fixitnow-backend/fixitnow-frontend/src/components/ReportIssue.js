@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getErrorMessage } from '../utils/constants';
-import { apiPost, useSession } from '../utils/profileSession';
+import { apiPost, resolveSessionProfileId, useSession } from '../utils/profileSession';
 
 const ReportIssue = () => {
     const navigate = useNavigate();
@@ -9,7 +9,7 @@ const ReportIssue = () => {
     const profile = session?.profile || {};
     const metadataRole = session?.session?.user?.user_metadata?.role || '';
     const role = (profile?.role || metadataRole || 'STUDENT').toUpperCase();
-    const userId = profile?.id;
+    const userId = profile?.id || resolveSessionProfileId();
 
     const [formData, setFormData] = useState({
         description: '',

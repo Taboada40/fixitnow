@@ -8,12 +8,10 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Repository;
-import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
 
-import java.net.http.HttpClient;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,7 +34,11 @@ public class SupabaseNotificationRepository {
     @Value("${supabase.service-key:}")
     private String supabaseServiceKey;
 
-    private final RestTemplate restTemplate = new RestTemplate(new JdkClientHttpRequestFactory(HttpClient.newHttpClient()));
+    private final RestTemplate restTemplate;
+
+    public SupabaseNotificationRepository(RestTemplate restTemplate) {
+        this.restTemplate = restTemplate;
+    }
 
     public NotificationItem insert(NotificationItem notification) {
         String url = supabaseUrl + "/rest/v1/notifications";
@@ -59,7 +61,7 @@ public class SupabaseNotificationRepository {
                     entity,
                     new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             String responseBody = e.getResponseBodyAsString();
             if (body.get("recipient_user_id") != null && responseBody.contains("recipient_user_id")) {
                 body.remove("recipient_user_id");
@@ -71,7 +73,7 @@ public class SupabaseNotificationRepository {
                             fallbackEntity,
                             new ParameterizedTypeReference<List<Map<String, Object>>>() {}
                     );
-                } catch (HttpClientErrorException fallbackError) {
+                } catch (HttpStatusCodeException fallbackError) {
                     throw mapClientError("notifications", fallbackError);
                 }
             } else {
@@ -104,7 +106,7 @@ public class SupabaseNotificationRepository {
                     entity,
                     new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             String responseBody = e.getResponseBodyAsString();
             if (responseBody.contains("recipient_user_id")) {
                 return List.of();
@@ -132,7 +134,7 @@ public class SupabaseNotificationRepository {
                     entity,
                     new ParameterizedTypeReference<List<Map<String, Object>>>() {}
             );
-        } catch (HttpClientErrorException e) {
+        } catch (HttpStatusCodeException e) {
             throw mapClientError("notifications", e);
         }
 
@@ -173,7 +175,7 @@ public class SupabaseNotificationRepository {
         return item;
     }
 
-    private IllegalStateException mapClientError(String tableName, HttpClientErrorException e) {
+    private IllegalStateException mapClientError(String tableName, HttpStatusCodeException e) {
         String response = e.getResponseBodyAsString();
         if (e.getStatusCode().value() == 404 || response.contains("PGRST205")) {
             return new IllegalStateException("Supabase table '" + tableName + "' is missing. Run SUPABASE_SETUP.sql in Supabase SQL Editor.");

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { STATUS_COLORS, getErrorMessage, normalizeStatus } from '../utils/constants';
-import { apiGet, useSession } from '../utils/profileSession';
+import { apiGet, resolveSessionProfileId, useSession } from '../utils/profileSession';
 
 const SearchIcon = () => (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -30,7 +30,7 @@ const Dashboard = () => {
     const profile = session?.profile || {};
     const metadataRole = session?.session?.user?.user_metadata?.role || '';
     const role = useMemo(() => (profile?.role || metadataRole || '').toUpperCase(), [profile?.role, metadataRole]);
-    const activeUserId = profile?.id || null;
+    const activeUserId = profile?.id || resolveSessionProfileId();
 
     const [filter, setFilter] = useState('All');
     const [search, setSearch] = useState('');
