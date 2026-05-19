@@ -1,8 +1,11 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
     useSession,
-    clearSession
+    clearSession,
+    apiGet,
+    buildNotificationKey,
+    getNotificationSeenAt
 } from '../utils/profileSession';
 
 const HomeIcon = () => (
@@ -48,8 +51,75 @@ const TopNavBar = () => {
 
     const metadataRole = session?.session?.user?.user_metadata?.role || '';
     const role = (profile?.role || metadataRole || '').toUpperCase();
+    const sessionEmail = profile?.email || session?.session?.user?.email || '';
+    const sessionUserId = profile?.id || session?.session?.user?.id || null;
+    const adminAccessParams = useMemo(
+        () => (sessionUserId ? { adminUserId: sessionUserId } : { adminEmail: sessionEmail }),
+        [sessionUserId, sessionEmail]
+    );
+    const notificationKey = useMemo(
+        () => buildNotificationKey({ role, userId: sessionUserId, email: sessionEmail }),
+        [role, sessionUserId, sessionEmail]
+    );
+    const notificationSeenAt = getNotificationSeenAt(notificationKey);
+    const [notificationItems, setNotificationItems] = useState([]);
+
     const notificationsPath = role === 'ADMIN' ? '/admin/notifications' : '/notifications';
     const homePath = role === 'ADMIN' ? '/admin/dashboard' : '/dashboard';
+
+    const computeUnseenCount = useCallback((items, seenAt) => {
+        const list = Array.isArray(items) ? items : [];
+        return list.filter((item) => {
+            const createdAt = item?.createdAt || item?.created_at;
+            const timestamp = createdAt ? new Date(createdAt).getTime() : NaN;
+            if (!Number.isFinite(timestamp)) {
+                return true;
+            }
+            return timestamp > seenAt;
+        }).length;
+    }, []);
+
+    const notificationCount = useMemo(
+        () => computeUnseenCount(notificationItems, notificationSeenAt),
+        [notificationItems, notificationSeenAt, computeUnseenCount]
+    );
+
+    const badgeText = notificationCount > 9 ? '+9' : `+${notificationCount}`;
+
+    const loadNotifications = useCallback(async () => {
+        if (!session) {
+            setNotificationItems([]);
+            return;
+        }
+        try {
+            if (role === 'ADMIN') {
+                if (!adminAccessParams.adminUserId && !adminAccessParams.adminEmail) return;
+                const res = await apiGet('/api/admin/notifications', { params: adminAccessParams });
+                setNotificationItems(Array.isArray(res.data) ? res.data : []);
+                return;
+            }
+            if (!sessionUserId) return;
+            const res = await apiGet('/api/notifications', { params: { userId: sessionUserId } });
+            setNotificationItems(Array.isArray(res.data) ? res.data : []);
+        } catch (err) {
+            setNotificationItems([]);
+        }
+    }, [session, role, adminAccessParams, sessionUserId]);
+
+    useEffect(() => {
+        if (!session) {
+            setNotificationItems([]);
+            return;
+        }
+        loadNotifications();
+        const intervalId = setInterval(loadNotifications, 15000);
+        const onFocus = () => loadNotifications();
+        window.addEventListener('focus', onFocus);
+        return () => {
+            clearInterval(intervalId);
+            window.removeEventListener('focus', onFocus);
+        };
+    }, [session, loadNotifications]);
 
     // Close dropdown on outside click
     useEffect(() => {
@@ -95,9 +165,35 @@ const TopNavBar = () => {
                     className="top-nav-icon-btn"
                     onClick={() => handleNavigate(notificationsPath)}
                     title="Notifications"
-                    aria-label="View notifications"
+                    aria-label={`View notifications${notificationCount > 0 ? ` (${notificationCount} new)` : ''}`}
                 >
-                    <BellIcon />
+                    <span style={{ position: 'relative', display: 'inline-flex' }}>
+                        <BellIcon />
+                        {notificationCount > 0 && (
+                            <span
+                                style={{
+                                    position: 'absolute',
+                                    top: '-6px',
+                                    right: '-6px',
+                                    minWidth: '18px',
+                                    height: '18px',
+                                    padding: '0 5px',
+                                    borderRadius: '999px',
+                                    background: 'var(--error)',
+                                    color: '#fff',
+                                    fontSize: '0.65rem',
+                                    fontWeight: 800,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    border: '1px solid var(--bg-navbar)',
+                                    lineHeight: 1
+                                }}
+                            >
+                                {badgeText}
+                            </span>
+                        )}
+                    </span>
                 </button>
 
                 <div className="top-nav-dropdown" ref={dropdownRef}>

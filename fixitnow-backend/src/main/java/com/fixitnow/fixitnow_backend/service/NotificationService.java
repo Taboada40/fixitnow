@@ -45,4 +45,12 @@ public class NotificationService {
     public List<NotificationItem> listAdminNotifications() {
         return notificationRepository.listForAdmin();
     }
+
+    public boolean deleteUserNotification(Long notificationId, Long userId) {
+        return notificationRepository.deleteForUser(notificationId, userId);
+    }
+
+    public boolean deleteAdminNotification(Long notificationId) {
+        return notificationRepository.deleteForAdmin(notificationId);
+    }
 }

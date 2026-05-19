@@ -76,6 +76,39 @@ export const readSession = () => sessionState;
 export const setSession = (session = null) => setSessionState(session);
 export const clearSession = () => setSessionState(null);
 
+export const buildNotificationKey = ({ role, userId, email } = {}) => {
+    const normalizedRole = String(role || 'USER').toUpperCase();
+    const identifier = userId ?? email ?? 'unknown';
+    return `${normalizedRole}:${identifier}`;
+};
+
+export const getNotificationSeenAt = (notificationKey) => {
+    if (!notificationKey) return 0;
+    return sessionState?.notification?.seenAt?.[notificationKey] || 0;
+};
+
+export const setNotificationSeenAt = (notificationKey, timestamp = Date.now()) => {
+    if (!notificationKey || !sessionState) return null;
+    const snapshot = sessionState || {};
+    const currentNotification = snapshot.notification || {};
+    const currentSeenAt = currentNotification.seenAt?.[notificationKey] || 0;
+    const nextTimestamp = Number.isFinite(timestamp) ? timestamp : Date.now();
+    if (nextTimestamp <= currentSeenAt) {
+        return snapshot;
+    }
+    const seenAt = {
+        ...(currentNotification.seenAt || {}),
+        [notificationKey]: nextTimestamp
+    };
+    return setSessionState({
+        ...snapshot,
+        notification: {
+            ...currentNotification,
+            seenAt
+        }
+    });
+};
+
 export const getSupabaseAccessToken = (sessionSnapshot = null) => {
     const s = sessionSnapshot || sessionState;
     return s?.session?.access_token || s?.session?.accessToken || s?.accessToken || '';

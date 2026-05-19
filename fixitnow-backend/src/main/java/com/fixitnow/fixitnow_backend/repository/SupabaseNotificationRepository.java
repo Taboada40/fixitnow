@@ -148,6 +148,58 @@ public class SupabaseNotificationRepository {
         return rows.stream().map(this::mapRow).collect(Collectors.toList());
     }
 
+    public boolean deleteForUser(Long notificationId, Long userId) {
+        if (notificationId == null || userId == null) {
+            return false;
+        }
+        String url = supabaseUrl + "/rest/v1/notifications?id=eq."
+                + notificationId
+                + "&recipient_user_id=eq."
+                + userId
+                + "&recipient_role=eq.USER";
+
+        HttpHeaders headers = createHeaders();
+        headers.set("Prefer", "return=representation");
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        try {
+            ResponseEntity<List<Map<String, Object>>> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.DELETE,
+                    entity,
+                    new ParameterizedTypeReference<List<Map<String, Object>>>() {}
+            );
+            List<Map<String, Object>> rows = response.getBody();
+            return rows != null && !rows.isEmpty();
+        } catch (HttpStatusCodeException e) {
+            throw mapClientError("notifications", e);
+        }
+    }
+
+    public boolean deleteForAdmin(Long notificationId) {
+        if (notificationId == null) {
+            return false;
+        }
+        String url = supabaseUrl + "/rest/v1/notifications?id=eq."
+                + notificationId
+                + "&recipient_role=eq.ADMIN";
+
+        HttpHeaders headers = createHeaders();
+        headers.set("Prefer", "return=representation");
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+        try {
+            ResponseEntity<List<Map<String, Object>>> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.DELETE,
+                    entity,
+                    new ParameterizedTypeReference<List<Map<String, Object>>>() {}
+            );
+            List<Map<String, Object>> rows = response.getBody();
+            return rows != null && !rows.isEmpty();
+        } catch (HttpStatusCodeException e) {
+            throw mapClientError("notifications", e);
+        }
+    }
+
     private HttpHeaders createHeaders() {
         String key = supabaseServiceKey == null || supabaseServiceKey.isBlank() ? supabaseKey : supabaseServiceKey;
         HttpHeaders headers = new HttpHeaders();

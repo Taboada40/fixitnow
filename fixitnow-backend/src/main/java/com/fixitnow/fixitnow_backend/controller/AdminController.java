@@ -13,6 +13,7 @@ import com.fixitnow.fixitnow_backend.util.StringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -124,6 +125,33 @@ public class AdminController {
 
         List<NotificationItem> notifications = notificationService.listAdminNotifications();
         return ResponseEntity.ok(notifications);
+    }
+
+    @DeleteMapping("/notifications/{id}")
+    public ResponseEntity<?> deleteAdminNotification(
+            @PathVariable("id") Long id,
+            @RequestParam(value = "adminUserId", required = false) Long adminUserId,
+            @RequestParam(value = "adminEmail", required = false) String adminEmail
+    ) {
+        if (!isAdmin(adminUserId, adminEmail)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "Admin access required"));
+        }
+        if (id == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Notification ID is required"));
+        }
+        try {
+            boolean deleted = notificationService.deleteAdminNotification(id);
+            if (!deleted) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("message", "Notification not found"));
+            }
+            return ResponseEntity.ok(Map.of("message", "Deleted"));
+        } catch (SupabaseRequestException ex) {
+            return ResponseEntity.status(ex.getStatus())
+                    .body(Map.of("message", "Failed to delete notification: " + ex.getMessage()));
+        } catch (RuntimeException ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to delete notification: " + ex.getMessage()));
+        }
     }
 
     private boolean isAdmin(Long userId, String email) {

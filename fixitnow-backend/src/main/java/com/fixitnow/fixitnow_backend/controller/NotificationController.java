@@ -4,7 +4,9 @@ import com.fixitnow.fixitnow_backend.exception.SupabaseRequestException;
 import com.fixitnow.fixitnow_backend.model.NotificationItem;
 import com.fixitnow.fixitnow_backend.service.NotificationService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -37,6 +39,31 @@ public class NotificationController {
                     .body(Map.of("message", "Failed to load notifications: " + ex.getMessage()));
         } catch (RuntimeException ex) {
             return ResponseEntity.status(500).body(Map.of("message", "Failed to load notifications: " + ex.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deleteUserNotification(
+            @PathVariable("id") Long id,
+            @RequestParam(value = "userId", required = false) Long userId
+    ) {
+        if (userId == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "User ID is required"));
+        }
+        if (id == null) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Notification ID is required"));
+        }
+        try {
+            boolean deleted = notificationService.deleteUserNotification(id, userId);
+            if (!deleted) {
+                return ResponseEntity.status(404).body(Map.of("message", "Notification not found"));
+            }
+            return ResponseEntity.ok(Map.of("message", "Deleted"));
+        } catch (SupabaseRequestException ex) {
+            return ResponseEntity.status(ex.getStatus())
+                    .body(Map.of("message", "Failed to delete notification: " + ex.getMessage()));
+        } catch (RuntimeException ex) {
+            return ResponseEntity.status(500).body(Map.of("message", "Failed to delete notification: " + ex.getMessage()));
         }
     }
 }
