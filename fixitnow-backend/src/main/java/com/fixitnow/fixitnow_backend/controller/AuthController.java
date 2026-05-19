@@ -183,6 +183,15 @@ public class AuthController {
         }
 
         try {
+            boolean adminAccount = profileService.getByEmail(identifier)
+                    .map(UserProfile::getRole)
+                    .map(role -> role != null && role.equalsIgnoreCase("ADMIN"))
+                    .orElse(false);
+            if (adminAccount) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of("message", "Admin passwords are locked and cannot be changed"));
+            }
+
             UserRequest verify = new UserRequest();
             verify.setEmail(identifier);
             verify.setPassword(request.getCurrentPassword());

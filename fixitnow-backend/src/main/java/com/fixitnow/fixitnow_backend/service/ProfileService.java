@@ -68,13 +68,15 @@ public class ProfileService {
 
         UserProfile profile = resolveProfileForUpdate(request);
 
+        boolean isAdmin = profile.getRole() != null && profile.getRole().equalsIgnoreCase("ADMIN");
+
         String normalizedEmail = StringUtils.valueOrFallback(request.getEmail(), profile.getEmail());
         if (!ValidationUtils.isNotBlank(normalizedEmail)) {
             throw new IllegalArgumentException("Email is required to update profile");
         }
 
-        // Validate username if provided
-        if (request.getUsername() != null && !ValidationUtils.isValidUsername(request.getUsername())) {
+        // Validate username if provided (skip for locked admin usernames)
+        if (!isAdmin && request.getUsername() != null && !ValidationUtils.isValidUsername(request.getUsername())) {
             throw new IllegalArgumentException("Username must be 3-50 characters and contain only letters, numbers, dots, hyphens, and underscores");
         }
 
@@ -85,7 +87,9 @@ public class ProfileService {
         }
 
         profile.setEmail(normalizedEmail);
-        profile.setUsername(mergeValue(request.getUsername(), profile.getUsername(), normalizedEmail));
+        profile.setUsername(isAdmin
+                ? profile.getUsername()
+                : mergeValue(request.getUsername(), profile.getUsername(), normalizedEmail));
         profile.setFirstName(mergeValue(request.getFirstName(), profile.getFirstName(), ""));
         profile.setLastName(mergeValue(request.getLastName(), profile.getLastName(), ""));
         profile.setRole(StringUtils.valueOrFallback(profile.getRole(), "STUDENT").toUpperCase());

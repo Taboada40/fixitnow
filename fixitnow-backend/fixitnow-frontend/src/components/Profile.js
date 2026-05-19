@@ -32,6 +32,7 @@ const Profile = () => {
     const authSession = session?.session || session || {};
     const metadataRole = authSession?.user?.user_metadata?.role || '';
     const role = useMemo(() => (storedProfile?.role || metadataRole || '').toUpperCase(), [storedProfile?.role, metadataRole]);
+    const isAdmin = role === 'ADMIN';
     const authenticatedEmail = useMemo(() => authSession?.user?.email || storedProfile?.email || '', [authSession?.user?.email, storedProfile?.email]);
     const authenticatedUserId = storedProfile?.id || authSession?.user?.id || resolveSessionProfileId() || null;
 
@@ -96,7 +97,7 @@ const Profile = () => {
             firstName: formData.firstName.trim(),
             lastName: formData.lastName.trim(),
             phoneNumber: formData.phoneNumber.trim(),
-            role: 'STUDENT'
+            role: role || 'STUDENT'
         };
 
         console.log('[Profile] Saving profile:', profilePayload);
@@ -141,11 +142,14 @@ const Profile = () => {
         }
 
         persistSessionAndForm(latestProfile);
-    }, [formData, authenticatedEmail, profileId, authenticatedUserId, persistSessionAndForm, stagedImage]);
+    }, [formData, authenticatedEmail, profileId, authenticatedUserId, persistSessionAndForm, stagedImage, role]);
 
     const updatePassword = useCallback(async () => {
         const effectiveEmail = (authenticatedEmail || formData.email || '').trim();
 
+        if (isAdmin) {
+            throw new Error('Admin passwords are locked and cannot be changed.');
+        }
         if (!formData.currentPassword || !formData.newPassword) {
             throw new Error('Current password and new password are required.');
         }
@@ -163,7 +167,7 @@ const Profile = () => {
         });
 
         setFormData(prev => ({ ...prev, currentPassword: '', newPassword: '', confirmPassword: '' }));
-    }, [formData, authenticatedEmail]);
+    }, [formData, authenticatedEmail, isAdmin]);
 
     // FIX: Load profile only once on mount, not on every session change
     useEffect(() => {
@@ -171,11 +175,6 @@ const Profile = () => {
             navigate('/login');
             return;
         }
-        if (role === 'ADMIN') {
-            navigate('/admin/dashboard');
-            return;
-        }
-
         const userId = authenticatedUserId;
         if (!userId) {
             setError('Unable to load profile. Please login again.');
@@ -273,7 +272,7 @@ const Profile = () => {
         try {
             await saveProfile();
 
-            const hasPasswordChange = formData.newPassword.trim().length > 0;
+            const hasPasswordChange = !isAdmin && formData.newPassword.trim().length > 0;
             if (hasPasswordChange) {
                 await updatePassword();
             }
@@ -412,7 +411,7 @@ const Profile = () => {
                                 type="text"
                                 value={formData.username}
                                 onChange={handleChange}
-                                disabled
+                                disabled={saving || isAdmin}
                             />
                         </div>
                         <div className="profile-form-field">
@@ -454,7 +453,7 @@ const Profile = () => {
                                     type="password"
                                     value={formData.currentPassword}
                                     onChange={handleChange}
-                                    disabled={saving}
+                                    disabled={saving || isAdmin}
                                     placeholder="Current password"
                                     autoComplete="current-password"
                                 />
@@ -468,7 +467,7 @@ const Profile = () => {
                                     type="password"
                                     value={formData.newPassword}
                                     onChange={handleChange}
-                                    disabled={saving}
+                                    disabled={saving || isAdmin}
                                     placeholder="New password"
                                     autoComplete="new-password"
                                 />
@@ -482,7 +481,7 @@ const Profile = () => {
                                     type="password"
                                     value={formData.confirmPassword}
                                     onChange={handleChange}
-                                    disabled={saving}
+                                    disabled={saving || isAdmin}
                                     placeholder="Confirm new password"
                                     autoComplete="new-password"
                                 />
