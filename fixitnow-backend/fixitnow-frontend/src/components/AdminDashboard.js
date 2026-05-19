@@ -3,6 +3,16 @@ import { useNavigate } from 'react-router-dom';
 import { STATUS_OPTIONS, getErrorMessage, normalizeStatus } from '../utils/constants';
 import { apiGet, apiPut, resolveSessionProfileId, useSession } from '../utils/profileSession';
 
+const EyeIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z" />
+        <circle cx="12" cy="12" r="3" />
+    </svg>
+);
+
+const resolveIssueImageUrl = (issue = {}) =>
+    issue?.imageUrl || issue?.image_url || issue?.imageName || issue?.image_name || '';
+
 const AdminDashboard = () => {
     const navigate = useNavigate();
     const session = useSession();
@@ -28,6 +38,8 @@ const AdminDashboard = () => {
     const [success, setSuccess] = useState('');
     const [updatingId, setUpdatingId] = useState(null);
     const successTimerRef = useRef(null);
+    const [imagePreview, setImagePreview] = useState(null);
+    const [imageError, setImageError] = useState(false);
 
     useEffect(() => {
         return () => {
@@ -115,6 +127,22 @@ const AdminDashboard = () => {
         }
     };
 
+    const handleViewImage = (issue) => {
+        const imageUrl = resolveIssueImageUrl(issue);
+        if (!imageUrl) return;
+        setImageError(false);
+        setImagePreview({
+            url: imageUrl,
+            title: issue?.description || issue?.title || 'Reported Issue',
+            id: issue?.id
+        });
+    };
+
+    const closeImagePreview = () => {
+        setImagePreview(null);
+        setImageError(false);
+    };
+
     return (
         <div className="profile-page">
             <div className="profile-card admin-dashboard-card">
@@ -162,11 +190,14 @@ const AdminDashboard = () => {
                                             <th>Description</th>
                                             <th>Location</th>
                                             <th>Status</th>
+                                            <th>Image</th>
                                             <th>Created</th>
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {reports.map((item) => (
+                                        {reports.map((item) => {
+                                            const imageUrl = resolveIssueImageUrl(item);
+                                            return (
                                             <tr key={item.id}>
                                                 <td>{item.email}</td>
                                                 <td>{item.description || item.title}</td>
@@ -183,9 +214,26 @@ const AdminDashboard = () => {
                                                         ))}
                                                     </select>
                                                 </td>
-                                                <td>{item.createdAt ? new Date(item.createdAt).toLocaleString() : '--'}</td>
+                                                <td className="admin-image-cell">
+                                                    <button
+                                                        className="db-issue-view-btn"
+                                                        type="button"
+                                                        title={imageUrl ? 'View image' : 'No image available'}
+                                                        aria-label={imageUrl ? 'View submitted image' : 'No image available'}
+                                                        onClick={() => handleViewImage(item)}
+                                                        disabled={!imageUrl}
+                                                    >
+                                                        <EyeIcon />
+                                                    </button>
+                                                </td>
+                                                <td>
+                                                    {item.createdAt || item.created_at
+                                                        ? new Date(item.createdAt || item.created_at).toLocaleString()
+                                                        : '--'}
+                                                </td>
                                             </tr>
-                                        ))}
+                                        );
+                                        })}
                                     </tbody>
                                 </table>
                             </div>
@@ -193,6 +241,37 @@ const AdminDashboard = () => {
                     </>
                 )}
             </div>
+            {imagePreview && (
+                <div className="db-image-modal" role="dialog" aria-modal="true" onClick={closeImagePreview}>
+                    <div className="db-image-modal-card" onClick={(e) => e.stopPropagation()}>
+                        <div className="db-image-modal-header">
+                            <div className="db-image-modal-title">
+                                {imagePreview.title}{imagePreview.id ? ` (#${imagePreview.id})` : ''}
+                            </div>
+                            <button
+                                className="db-image-modal-close"
+                                type="button"
+                                onClick={closeImagePreview}
+                                aria-label="Close image preview"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="db-image-modal-body">
+                            {imageError ? (
+                                <div className="db-image-fallback">Image unavailable.</div>
+                            ) : (
+                                <img
+                                    className="db-image-modal-img"
+                                    src={imagePreview.url}
+                                    alt={imagePreview.title}
+                                    onError={() => setImageError(true)}
+                                />
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

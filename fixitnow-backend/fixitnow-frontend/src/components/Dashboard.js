@@ -10,6 +10,16 @@ const SearchIcon = () => (
     </svg>
 );
 
+const EyeIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z" />
+        <circle cx="12" cy="12" r="3" />
+    </svg>
+);
+
+const resolveIssueImageUrl = (issue = {}) =>
+    issue?.imageUrl || issue?.image_url || issue?.imageName || issue?.image_name || '';
+
 const buildSummaryFromReports = (items) => {
     const reports = Array.isArray(items) ? items : [];
     return {
@@ -41,6 +51,8 @@ const Dashboard = () => {
     const [isInitialLoad, setIsInitialLoad] = useState(true);
     const isFetchingRef = useRef(false);
     const hasLoadedOnceRef = useRef(false);
+    const [imagePreview, setImagePreview] = useState(null);
+    const [imageError, setImageError] = useState(false);
 
     const loadReports = useCallback(async ({ showLoader = false } = {}) => {
         if (!activeUserId || isFetchingRef.current) return;
@@ -131,6 +143,22 @@ const Dashboard = () => {
         });
     }, [reports, filter, search]);
 
+    const handleViewImage = useCallback((issue) => {
+        const imageUrl = resolveIssueImageUrl(issue);
+        if (!imageUrl) return;
+        setImageError(false);
+        setImagePreview({
+            url: imageUrl,
+            title: issue?.title || 'Reported Issue',
+            id: issue?.id
+        });
+    }, []);
+
+    const closeImagePreview = useCallback(() => {
+        setImagePreview(null);
+        setImageError(false);
+    }, []);
+
     return (
         <div className="db-wrapper">
             <main className="db-main">
@@ -189,6 +217,7 @@ const Dashboard = () => {
                         filtered.map(issue => {
                             const status = normalizeStatus(issue.status);
                             const color = STATUS_COLORS[status] || STATUS_COLORS.default;
+                            const imageUrl = resolveIssueImageUrl(issue);
                             return (
                                 <div key={issue.id} className="db-issue-card">
                                     <div className="db-issue-header">
@@ -198,6 +227,18 @@ const Dashboard = () => {
                                                 {status.replace('-', ' ')}
                                             </span>
                                         </div>
+                                        <div className="db-issue-actions">
+                                            <button
+                                                className="db-issue-view-btn"
+                                                type="button"
+                                                title={imageUrl ? 'View image' : 'No image available'}
+                                                aria-label={imageUrl ? 'View submitted image' : 'No image available'}
+                                                onClick={() => handleViewImage(issue)}
+                                                disabled={!imageUrl}
+                                            >
+                                                <EyeIcon />
+                                            </button>
+                                        </div>
                                     </div>
                                     <div className="db-issue-body">
                                         <h3 className="db-issue-title">{issue.title || 'Untitled Issue'}</h3>
@@ -205,7 +246,9 @@ const Dashboard = () => {
                                         <div className="db-issue-meta">
                                             <span className="db-issue-location">📍 {issue.location || 'Unknown location'}</span>
                                             <span className="db-issue-date">
-                                                {issue.createdAt ? new Date(issue.createdAt).toLocaleDateString() : 'No date'}
+                                                {issue.createdAt || issue.created_at
+                                                    ? new Date(issue.createdAt || issue.created_at).toLocaleDateString()
+                                                    : 'No date'}
                                             </span>
                                         </div>
                                     </div>
@@ -224,6 +267,37 @@ const Dashboard = () => {
                     </button>
                 </div>
             </main>
+            {imagePreview && (
+                <div className="db-image-modal" role="dialog" aria-modal="true" onClick={closeImagePreview}>
+                    <div className="db-image-modal-card" onClick={(e) => e.stopPropagation()}>
+                        <div className="db-image-modal-header">
+                            <div className="db-image-modal-title">
+                                {imagePreview.title}{imagePreview.id ? ` (#${imagePreview.id})` : ''}
+                            </div>
+                            <button
+                                className="db-image-modal-close"
+                                type="button"
+                                onClick={closeImagePreview}
+                                aria-label="Close image preview"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="db-image-modal-body">
+                            {imageError ? (
+                                <div className="db-image-fallback">Image unavailable.</div>
+                            ) : (
+                                <img
+                                    className="db-image-modal-img"
+                                    src={imagePreview.url}
+                                    alt={imagePreview.title}
+                                    onError={() => setImageError(true)}
+                                />
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
