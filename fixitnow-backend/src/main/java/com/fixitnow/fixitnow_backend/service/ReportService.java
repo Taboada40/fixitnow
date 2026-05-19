@@ -10,6 +10,7 @@ import com.fixitnow.fixitnow_backend.util.StringUtils;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -35,31 +36,14 @@ public class ReportService {
     }
 
     public ReportItem createReport(ReportRequest request) {
-        if (request.getUserId() == null) {
-            throw new IllegalArgumentException("User ID is required");
-        }
+        return createReportInternal(request, null, null, null);
+    }
 
-        UserProfile user = profileService.getById(request.getUserId())
-                .orElseThrow(() -> new IllegalArgumentException("User profile not found for the provided ID"));
-
-        ReportItem item = new ReportItem();
-        item.setUserId(user.getId());
-        item.setEmail(StringUtils.normalizeEmail(user.getEmail()));
-        String normalizedDescription = normalizeDescription(request.getDescription());
-        String normalizedLocation = normalizeLocation(request.getLocation());
-        item.setTitle(normalizeTitle(request.getTitle(), normalizedDescription, normalizedLocation));
-        item.setDescription(normalizedDescription);
-        item.setLocation(normalizedLocation);
-        item.setImageName(normalizeImageName(request.getImageName()));
-        item.setStatus(normalizeStatus(request.getStatus()));
-        ReportItem saved = reportRepository.insert(item);
-        try {
-            notificationService.notifyAdminNewReport(saved);
-        } catch (Exception ex) {
-            // Notifications are a side effect and should not fail report creation.
-            LOGGER.log(Level.WARNING, "Failed to create admin notification for report {0}", saved.getId());
+    public ReportItem createReportWithImage(ReportRequest request, String fileName, String contentType, byte[] imageBytes) {
+        if (imageBytes == null || imageBytes.length == 0) {
+            return createReportInternal(request, null, null, null);
         }
-        return saved;
+        return createReportInternal(request, fileName, contentType, imageBytes);
     }
 
     public List<ReportItem> listAllReports() {
@@ -123,7 +107,104 @@ public class ReportService {
         return value.trim();
     }
 
+    private String normalizeImagePath(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private String normalizeImageUrl(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
+    }
+
     private String normalizeStatus(String value) {
         return ReportStatus.from(value).label();
+    }
+
+    private ReportItem createReportInternal(ReportRequest request, String fileName, String contentType, byte[] imageBytes) {
+        if (request.getUserId() == null) {
+            throw new IllegalArgumentException("User ID is required");
+        }
+
+        UserProfile user = profileService.getById(request.getUserId())
+                .orElseThrow(() -> new IllegalArgumentException("User profile not found for the provided ID"));
+
+        ReportItem item = new ReportItem();
+        item.setUserId(user.getId());
+        item.setEmail(StringUtils.normalizeEmail(user.getEmail()));
+        String normalizedDescription = normalizeDescription(request.getDescription());
+        String normalizedLocation = normalizeLocation(request.getLocation());
+        item.setTitle(normalizeTitle(request.getTitle(), normalizedDescription, normalizedLocation));
+        item.setDescription(normalizedDescription);
+        item.setLocation(normalizedLocation);
+        item.setStatus(normalizeStatus(request.getStatus()));
+
+        String imageName = normalizeImageName(request.getImageName());
+        String imagePath = normalizeImagePath(request.getImagePath());
+        String imageUrl = normalizeImageUrl(request.getImageUrl());
+        if (imageUrl == null && imagePath != null) {
+            imageUrl = reportRepository.buildPublicReportImageUrl(imagePath);
+        }
+        if (imageUrl == null && imageName != null && isHttpUrl(imageName)) {
+            imageUrl = imageName.trim();
+        }
+        item.setImageName(imageName);
+        item.setImagePath(imagePath);
+        item.setImageUrl(imageUrl);
+
+        if (imageBytes != null && imageBytes.length > 0) {
+            String extension = resolveImageExtension(fileName, contentType);
+            String identity = resolveStorageIdentity(user);
+            String objectPath = "reports/" + identity + "/issue-" + System.currentTimeMillis() + extension;
+            reportRepository.uploadReportImage(objectPath, imageBytes, contentType);
+            item.setImageName(normalizeImageName(fileName));
+            item.setImagePath(objectPath);
+            item.setImageUrl(reportRepository.buildPublicReportImageUrl(objectPath));
+        }
+
+        ReportItem saved = reportRepository.insert(item);
+        try {
+            notificationService.notifyAdminNewReport(saved);
+        } catch (Exception ex) {
+            // Notifications are a side effect and should not fail report creation.
+            LOGGER.log(Level.WARNING, "Failed to create admin notification for report {0}", saved.getId());
+        }
+        return saved;
+    }
+
+    private String resolveStorageIdentity(UserProfile profile) {
+        if (profile.getId() != null) {
+            return "id-" + profile.getId();
+        }
+        String normalizedEmail = StringUtils.normalizeEmail(profile.getEmail());
+        if (normalizedEmail == null || normalizedEmail.isBlank()) {
+            throw new IllegalArgumentException("Unable to resolve storage identity for report image");
+        }
+        return normalizedEmail.replaceAll("[^a-z0-9@._-]", "_");
+    }
+
+    private String resolveImageExtension(String fileName, String contentType) {
+        String lowerFile = fileName == null ? "" : fileName.trim().toLowerCase(Locale.ROOT);
+        if (lowerFile.endsWith(".png")) {
+            return ".png";
+        }
+        if (lowerFile.endsWith(".jpg") || lowerFile.endsWith(".jpeg")) {
+            return ".jpg";
+        }
+
+        String lowerType = contentType == null ? "" : contentType.trim().toLowerCase(Locale.ROOT);
+        if ("image/png".equals(lowerType)) {
+            return ".png";
+        }
+        return ".jpg";
+    }
+
+    private boolean isHttpUrl(String value) {
+        String trimmed = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        return trimmed.startsWith("http://") || trimmed.startsWith("https://");
     }
 }

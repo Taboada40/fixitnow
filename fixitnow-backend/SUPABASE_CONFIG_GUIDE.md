@@ -7,7 +7,7 @@ Your codebase is **already fully integrated with Supabase**. There is no localSt
 - Profile CRUD operations
 - Report management
 - Notification system
-- File storage (profile pictures)
+- File storage (profile pictures and report images)
 
 The 500 Internal Server Error and 403 errors you're experiencing are caused by missing Supabase environment variables.
 
@@ -41,6 +41,7 @@ The 500 Internal Server Error and 403 errors you're experiencing are caused by m
 3. Run the SQL setup script in Supabase:
    - Open `SUPABASE_SETUP.sql` in the Supabase SQL Editor
    - Execute the script to create the required tables and storage buckets
+   - Buckets created: `profiles` (profile pictures) and `report_image` (issue images)
 
 ### Step 3: Configure Frontend
 

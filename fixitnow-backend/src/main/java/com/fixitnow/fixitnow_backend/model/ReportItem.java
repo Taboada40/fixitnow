@@ -20,6 +20,10 @@ public class ReportItem {
 
     private String imageName;
 
+    private String imagePath;
+
+    private String imageUrl;
+
     private String status;
 
     private LocalDateTime createdAt;
@@ -90,6 +94,42 @@ public class ReportItem {
 
     public void setImageName(String imageName) {
         this.imageName = imageName;
+    }
+
+    public String getImagePath() {
+        return imagePath;
+    }
+
+    @JsonProperty("image_path")
+    public String getImagePathSnakeCase() {
+        return imagePath;
+    }
+
+    public void setImagePath(String imagePath) {
+        this.imagePath = imagePath;
+    }
+
+    @JsonProperty("image_path")
+    public void setImagePathSnakeCase(String imagePath) {
+        this.imagePath = imagePath;
+    }
+
+    public String getImageUrl() {
+        return imageUrl;
+    }
+
+    @JsonProperty("image_url")
+    public String getImageUrlSnakeCase() {
+        return imageUrl;
+    }
+
+    public void setImageUrl(String imageUrl) {
+        this.imageUrl = imageUrl;
+    }
+
+    @JsonProperty("image_url")
+    public void setImageUrlSnakeCase(String imageUrl) {
+        this.imageUrl = imageUrl;
     }
 
     public String getStatus() {

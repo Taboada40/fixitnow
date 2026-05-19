@@ -16,7 +16,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Repository;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
@@ -39,6 +41,9 @@ public class SupabaseReportRepository {
 
     @Value("${supabase.service-key:}")
     private String supabaseServiceKey;
+
+    @Value("${supabase.storage.report-bucket:report_image}")
+    private String reportBucket;
 
     private final RestTemplate restTemplate;
 
@@ -110,6 +115,8 @@ public class SupabaseReportRepository {
         body.put("description", item.getDescription());
         body.put("location", item.getLocation());
         body.put("image_name", item.getImageName());
+        body.put("image_path", item.getImagePath());
+        body.put("image_url", item.getImageUrl());
         body.put("status", item.getStatus());
 
         HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, createInsertHeaders());
@@ -237,6 +244,51 @@ public class SupabaseReportRepository {
         return headers;
     }
 
+    public void uploadReportImage(String objectPath, byte[] imageBytes, String contentType) {
+        if (objectPath == null || objectPath.isBlank()) {
+            throw new IllegalArgumentException("Storage object path is required");
+        }
+        if (imageBytes == null || imageBytes.length == 0) {
+            throw new IllegalArgumentException("Report image bytes are required");
+        }
+
+        String encodedPath = UriUtils.encodePath(objectPath, StandardCharsets.UTF_8);
+        String url = supabaseUrl + "/storage/v1/object/" + reportBucket + "/" + encodedPath;
+
+        HttpHeaders headers = createStorageHeaders(contentType);
+        headers.set("x-upsert", "true");
+        HttpEntity<byte[]> entity = new HttpEntity<>(imageBytes, headers);
+        try {
+            restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    entity,
+                    new ParameterizedTypeReference<Map<String, Object>>() {}
+            );
+        } catch (HttpStatusCodeException e) {
+            throw new IllegalStateException("Supabase storage upload failed: " + e.getResponseBodyAsString());
+        }
+    }
+
+    public String buildPublicReportImageUrl(String objectPath) {
+        if (objectPath == null || objectPath.isBlank()) {
+            return null;
+        }
+        String encodedPath = UriUtils.encodePath(objectPath, StandardCharsets.UTF_8);
+        return supabaseUrl + "/storage/v1/object/public/" + reportBucket + "/" + encodedPath;
+    }
+
+    private HttpHeaders createStorageHeaders(String contentType) {
+        String key = supabaseServiceKey == null || supabaseServiceKey.isBlank() ? supabaseKey : supabaseServiceKey;
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("apikey", key);
+        headers.set("Authorization", "Bearer " + key);
+        headers.setContentType(MediaType.parseMediaType(
+                contentType == null || contentType.isBlank() ? MediaType.APPLICATION_OCTET_STREAM_VALUE : contentType
+        ));
+        return headers;
+    }
+
     private ReportItem mapRow(Map<String, Object> row) {
         ReportItem item = new ReportItem();
         item.setId(toLong(row.get("id")));
@@ -245,7 +297,18 @@ public class SupabaseReportRepository {
         item.setTitle(toText(row.get("title")));
         item.setDescription(toText(row.get("description")));
         item.setLocation(toText(row.get("location")));
-        item.setImageName(toText(row.get("image_name")));
+        String imageName = toText(row.get("image_name"));
+        String imagePath = toText(row.get("image_path"));
+        String imageUrl = toText(row.get("image_url"));
+        if ((imageUrl == null || imageUrl.isBlank()) && imagePath != null && !imagePath.isBlank()) {
+            imageUrl = buildPublicReportImageUrl(imagePath);
+        }
+        if ((imageUrl == null || imageUrl.isBlank()) && imageName != null && isHttpUrl(imageName)) {
+            imageUrl = imageName.trim();
+        }
+        item.setImageName(imageName);
+        item.setImagePath(imagePath);
+        item.setImageUrl(imageUrl);
         item.setStatus(toText(row.get("status")));
         item.setCreatedAt(toDateTime(row.get("created_at")));
         item.setUpdatedAt(toDateTime(row.get("updated_at")));
@@ -292,6 +355,11 @@ public class SupabaseReportRepository {
             return fallback;
         }
         return value.trim();
+    }
+
+    private boolean isHttpUrl(String value) {
+        String trimmed = value == null ? "" : value.trim().toLowerCase();
+        return trimmed.startsWith("http://") || trimmed.startsWith("https://");
     }
 
     private SupabaseRequestException mapClientError(String tableName, HttpStatusCodeException e) {

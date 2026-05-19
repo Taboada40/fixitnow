@@ -1,11 +1,15 @@
 package com.fixitnow.fixitnow_backend.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 public class ReportRequest {
     private Long userId;
     private String title;
     private String description;
     private String location;
     private String imageName;
+    private String imagePath;
+    private String imageUrl;
     private String status;
 
     public Long getUserId() {
@@ -54,5 +58,41 @@ public class ReportRequest {
 
     public void setImageName(String imageName) {
         this.imageName = imageName;
+    }
+
+    public String getImagePath() {
+        return imagePath;
+    }
+
+    @JsonProperty("image_path")
+    public String getImagePathSnakeCase() {
+        return imagePath;
+    }
+
+    public void setImagePath(String imagePath) {
+        this.imagePath = imagePath;
+    }
+
+    @JsonProperty("image_path")
+    public void setImagePathSnakeCase(String imagePath) {
+        this.imagePath = imagePath;
+    }
+
+    public String getImageUrl() {
+        return imageUrl;
+    }
+
+    @JsonProperty("image_url")
+    public String getImageUrlSnakeCase() {
+        return imageUrl;
+    }
+
+    public void setImageUrl(String imageUrl) {
+        this.imageUrl = imageUrl;
+    }
+
+    @JsonProperty("image_url")
+    public void setImageUrlSnakeCase(String imageUrl) {
+        this.imageUrl = imageUrl;
     }
 }

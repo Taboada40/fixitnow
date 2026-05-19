@@ -26,6 +26,8 @@ create table if not exists public.report_items (
     description text not null,
     location text not null,
     image_name text,
+    image_path text,
+    image_url text,
     status text not null default 'Pending',
     created_at timestamptz not null default timezone('utc', now()),
     updated_at timestamptz not null default timezone('utc', now())
@@ -52,6 +54,8 @@ alter table public.user_profiles add column if not exists profile_image_content_
 alter table public.report_items add column if not exists description text not null default 'No description provided.';
 alter table public.report_items add column if not exists location text not null default 'Unspecified location';
 alter table public.report_items add column if not exists image_name text;
+alter table public.report_items add column if not exists image_path text;
+alter table public.report_items add column if not exists image_url text;
 alter table public.report_items add column if not exists user_id bigint;
 alter table public.notifications add column if not exists report_id bigint;
 alter table public.notifications add column if not exists recipient_user_id bigint;
@@ -114,6 +118,14 @@ alter table public.report_items
 
 create index if not exists idx_report_items_user_id on public.report_items(user_id);
 create index if not exists idx_notifications_recipient_user_id on public.notifications(recipient_user_id);
+
+insert into storage.buckets (id, name, public)
+values ('profiles', 'profiles', true)
+on conflict (id) do update set public = excluded.public;
+
+insert into storage.buckets (id, name, public)
+values ('report_image', 'report_image', true)
+on conflict (id) do update set public = excluded.public;
 
 alter table public.notifications drop constraint if exists notifications_recipient_user_id_fkey;
 alter table public.notifications

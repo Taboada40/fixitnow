@@ -14,7 +14,8 @@ const ReportIssue = () => {
     const [formData, setFormData] = useState({
         description: '',
         location: '',
-        imageName: ''
+        imageName: '',
+        imageFile: null
     });
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
@@ -54,15 +55,25 @@ const ReportIssue = () => {
 
         setSubmitting(true);
         try {
-            await apiPost('/api/reports', {
-                userId,
-                description: formData.description,
-                location: formData.location,
-                imageName: formData.imageName || null,
-                status: 'Pending'
-            });
+            if (formData.imageFile) {
+                const payload = new FormData();
+                payload.append('userId', String(userId));
+                payload.append('description', formData.description);
+                payload.append('location', formData.location);
+                payload.append('status', 'Pending');
+                payload.append('file', formData.imageFile);
+                await apiPost('/api/reports', payload);
+            } else {
+                await apiPost('/api/reports', {
+                    userId,
+                    description: formData.description,
+                    location: formData.location,
+                    imageName: formData.imageName || null,
+                    status: 'Pending'
+                });
+            }
 
-            setFormData({ description: '', location: '', imageName: '' });
+            setFormData({ description: '', location: '', imageName: '', imageFile: null });
             setSuccess('Report submitted successfully.');
             navigate('/dashboard');
         } catch (err) {
@@ -94,8 +105,12 @@ const ReportIssue = () => {
                                 type="file"
                                 accept="image/*"
                                 onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    setFormData((prev) => ({ ...prev, imageName: file ? file.name : '' }));
+                                    const file = e.target.files?.[0] || null;
+                                    setFormData((prev) => ({
+                                        ...prev,
+                                        imageName: file ? file.name : '',
+                                        imageFile: file
+                                    }));
                                 }}
                             />
                             <span className="report-image-plus">+</span>

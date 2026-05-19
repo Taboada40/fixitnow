@@ -6,7 +6,9 @@ import com.fixitnow.fixitnow_backend.model.ReportRequest;
 import com.fixitnow.fixitnow_backend.model.ReportStatus;
 import com.fixitnow.fixitnow_backend.model.UserDashboardSummary;
 import com.fixitnow.fixitnow_backend.service.ReportService;
+import com.fixitnow.fixitnow_backend.util.ValidationUtils;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,7 +18,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -76,34 +80,25 @@ public class ReportController {
 
     @PostMapping
     public ResponseEntity<?> createReport(@RequestBody ReportRequest request) {
-        if (request == null) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Report payload is required"));
-        }
-        if (request.getUserId() == null) {
-            return ResponseEntity.badRequest().body(Map.of("message", "User ID is required"));
-        }
-        boolean missingTitle = request.getTitle() == null || request.getTitle().isBlank();
-        boolean missingDescription = request.getDescription() == null || request.getDescription().isBlank();
-        if (missingTitle && missingDescription) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Description is required"));
-        }
-        if (request.getLocation() == null || request.getLocation().isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Location is required"));
-        }
-        try {
-            ReportItem saved = reportService.createReport(request);
-            return ResponseEntity.status(HttpStatus.CREATED).body(saved);
-        } catch (IllegalArgumentException ex) {
-            String message = ex.getMessage() == null ? "Invalid report payload" : ex.getMessage();
-            int status = message.toLowerCase().contains("not found") ? HttpStatus.NOT_FOUND.value() : HttpStatus.BAD_REQUEST.value();
-            return ResponseEntity.status(status).body(Map.of("message", message));
-        } catch (SupabaseRequestException ex) {
-            return ResponseEntity.status(ex.getStatus())
-                    .body(Map.of("message", "Failed to create report: " + ex.getMessage()));
-        } catch (RuntimeException ex) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(Map.of("message", "Failed to create report: " + ex.getMessage()));
-        }
+        return handleCreateReport(request, null);
+    }
+
+    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> createReportWithImage(
+            @RequestParam("userId") Long userId,
+            @RequestParam(value = "title", required = false) String title,
+            @RequestParam(value = "description", required = false) String description,
+            @RequestParam(value = "location", required = false) String location,
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "file", required = false) MultipartFile file
+    ) {
+        ReportRequest request = new ReportRequest();
+        request.setUserId(userId);
+        request.setTitle(title);
+        request.setDescription(description);
+        request.setLocation(location);
+        request.setStatus(status);
+        return handleCreateReport(request, file);
     }
 
     @DeleteMapping("/{id}")
@@ -157,5 +152,63 @@ public class ReportController {
                 .count());
         summary.setLastReportAt(lastReportAt);
         return summary;
+    }
+
+    private ResponseEntity<?> handleCreateReport(ReportRequest request, MultipartFile file) {
+        String validationError = validateReportRequest(request);
+        if (validationError != null) {
+            return ResponseEntity.badRequest().body(Map.of("message", validationError));
+        }
+        if (file != null && !file.isEmpty() && !isAllowedImage(file)) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Only .jpg, .jpeg, and .png images are supported"));
+        }
+        try {
+            ReportItem saved = (file == null || file.isEmpty())
+                    ? reportService.createReport(request)
+                    : reportService.createReportWithImage(
+                        request,
+                        file.getOriginalFilename(),
+                        file.getContentType(),
+                        file.getBytes()
+                    );
+            return ResponseEntity.status(HttpStatus.CREATED).body(saved);
+        } catch (IllegalArgumentException ex) {
+            String message = ex.getMessage() == null ? "Invalid report payload" : ex.getMessage();
+            int status = message.toLowerCase().contains("not found")
+                    ? HttpStatus.NOT_FOUND.value()
+                    : HttpStatus.BAD_REQUEST.value();
+            return ResponseEntity.status(status).body(Map.of("message", message));
+        } catch (SupabaseRequestException ex) {
+            return ResponseEntity.status(ex.getStatus())
+                    .body(Map.of("message", "Failed to create report: " + ex.getMessage()));
+        } catch (IOException ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to read uploaded file"));
+        } catch (RuntimeException ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("message", "Failed to create report: " + ex.getMessage()));
+        }
+    }
+
+    private String validateReportRequest(ReportRequest request) {
+        if (request == null) {
+            return "Report payload is required";
+        }
+        if (request.getUserId() == null) {
+            return "User ID is required";
+        }
+        boolean missingTitle = request.getTitle() == null || request.getTitle().isBlank();
+        boolean missingDescription = request.getDescription() == null || request.getDescription().isBlank();
+        if (missingTitle && missingDescription) {
+            return "Description is required";
+        }
+        if (request.getLocation() == null || request.getLocation().isBlank()) {
+            return "Location is required";
+        }
+        return null;
+    }
+
+    private boolean isAllowedImage(MultipartFile file) {
+        return ValidationUtils.isAllowedImageType(file.getContentType(), file.getOriginalFilename());
     }
 }
